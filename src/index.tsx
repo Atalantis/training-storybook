@@ -1932,6 +1932,30 @@ app.get('/', (c) => {
                         Classez vos documents par client, projet ou toute classification personnelle. Totalement indépendant des tags de contenu.
                     </p>
                 </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">✅</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Gestion Multiple (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        Sélection par checkboxes + <strong>Shift+Click</strong> pour plages. Actions bulk : suppression, modification et déplacement groupés.
+                    </p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">🔄</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Conversion PDF (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        Convertissez vos PDF directement depuis la bibliothèque. Remplacement automatique du fichier original avec progress en temps réel.
+                    </p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">🎯</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Analyse Unitaire (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        Bouton d'analyse IA sur chaque document pour réanalyse ciblée. Idéal après modifications ou pour affiner les métadonnées.
+                    </p>
+                </div>
             </div>
 
             <!-- Demo Section -->
@@ -2312,6 +2336,30 @@ app.get('/en', (c) => {
                     <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Custom Client Tags</h3>
                     <p style="opacity: 0.8; line-height: 1.6;">
                         Classify your documents by client, project, or any personal classification. Fully independent from content tags.
+                    </p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">✅</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Bulk Management (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        Checkbox selection + <strong>Shift+Click</strong> for ranges. Bulk actions: group deletion, modification, and movement.
+                    </p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">🔄</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">PDF Conversion (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        Convert PDFs directly from library. Automatic file replacement with real-time progress tracking.
+                    </p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">🎯</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Individual Analysis (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        AI analysis button on each document for targeted re-analysis. Perfect after edits or to refine metadata.
                     </p>
                 </div>
             </div>
