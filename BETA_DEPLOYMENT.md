@@ -14,9 +14,9 @@
 Cette URL est **permanente** pour la branche beta. Tous les futurs pushs sur la branche `beta` mettront automatiquement à jour cette URL.
 
 ### 🔗 URL Preview (Commit Spécifique)
-**https://ddf4ec91.training-storybook.pages.dev** (dernier déploiement)
+**https://0df324a1.training-storybook.pages.dev** (dernier déploiement)
 
-Cette URL est liée au **commit spécifique** incluant le fix InvalidPDFException. Elle ne changera pas même si tu pushs de nouveaux commits sur beta.
+Cette URL est liée au **commit spécifique** incluant smart multi-page sampling. Elle ne changera pas même si tu pushs de nouveaux commits sur beta.
 
 ---
 
@@ -27,6 +27,7 @@ Cette URL est liée au **commit spécifique** incluant le fix InvalidPDFExceptio
 **Derniers Commits :**  
 - `6fe79e4` (feat(beta): 6 correctifs majeurs)
 - `2eb7852` (fix(batch-analyze): InvalidPDFException fix)
+- `a487c53` (feat(batch-analyze): Smart multi-page sampling)
 
 **Build Time :** 427ms  
 **Upload Time :** 1.50s  
@@ -72,6 +73,14 @@ Cette URL est liée au **commit spécifique** incluant le fix InvalidPDFExceptio
 - **Impact :** Déblocage complet de l'analyse batch (télécharge PDF binaire au lieu de HTML)
 - **Commit :** `2eb7852`
 
+### 8. 🆕 Smart Multi-Page Sampling pour PDFs Scannés
+- **Fix :** Échantillonnage intelligent jusqu'à 5 pages au lieu d'1 seule
+- **Fichier :** `public/static/admin.js` lignes 3746-3811
+- **Logique :** Arrêt anticipé quand 300+ caractères trouvés
+- **Impact :** Meilleur taux de succès pour PDFs scannés (image + contexte partiel)
+- **Performance :** +160-410ms overhead (acceptable)
+- **Commit :** `a487c53`
+
 ---
 
 ## 🧪 Plan de Test Beta
@@ -107,8 +116,9 @@ Cette URL est liée au **commit spécifique** incluant le fix InvalidPDFExceptio
 5. **Vérifier :**
    - ✅ Status: "📥 Téléchargement {filename}..."
    - ✅ **CRITIQUE:** Pas d'erreur `InvalidPDFException` en console
-   - ✅ Status: "🔍 Extraction rapide (1 page)..."
+   - ✅ Status: "🔍 Extraction rapide (1-5 pages)..." 🆕
    - ✅ Extraction texte réussie (pas de fichier 3 KB)
+   - ✅ Log: "✅ Sufficient text found after X pages" (si texte trouvé) 🆕
    - ✅ Envoi à l'IA réussi
    - ✅ Affichage tags/suggestions
 6. **Cliquer "Plus tard"**
@@ -157,7 +167,8 @@ Via le dashboard Cloudflare Pages :
 - `BATCH_UPLOAD_AI_ANALYSIS_FIX.md` (6.6 KB)
 - `CLOSED_BOOK_ANIMATION_FIX.md` (6.9 KB)
 - `CLOSED_BOOK_TIMING_FIX.md` (8.9 KB)
-- `INVALID_PDF_EXCEPTION_FIX.md` (5.0 KB) 🆕
+- `INVALID_PDF_EXCEPTION_FIX.md` (5.0 KB)
+- `SMART_SAMPLING_FIX.md` (7.5 KB) 🆕
 - `PROJECT_STATUS_SUMMARY.md` (16 KB)
 
 ---
@@ -198,7 +209,7 @@ git push origin --delete beta
 | Aspect | Production (main) | Beta |
 |--------|-------------------|------|
 | URL | training-storybook.pages.dev | beta.training-storybook.pages.dev |
-| Correctifs | Ancienne version | 7 nouveaux correctifs ✅ |
+| Correctifs | Ancienne version | 8 nouveaux correctifs ✅ |
 | Closed Book | ❌ Couverture blanche | ✅ Couverture page 1 |
 | Timing | ❌ Livre ouvert avant overlay | ✅ Overlay immédiat (131ms) |
 | Animation | ❌ Flip 360° bizarre | ✅ Fade out fluide |
