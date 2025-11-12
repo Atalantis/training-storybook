@@ -580,7 +580,7 @@ function showAdminPanel() {
                     <!-- Accordion Header (Clickable) -->
                     <button 
                         onclick="toggleUploadAccordion()" 
-                        class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-gray-750 transition rounded-xl"
+                        class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-gray-700 transition rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                         id="upload-accordion-header"
                     >
                         <h2 class="text-xl font-bold text-white flex items-center gap-2">
