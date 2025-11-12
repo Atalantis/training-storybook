@@ -4449,6 +4449,35 @@ async function startBatchAnalyze() {
             totalTextLength: documentsToAnalyze.reduce((sum, doc) => sum + doc.text.length, 0)
         });
         
+        // Estimate AI processing time: ~8-10 seconds per document
+        const estimatedAIDuration = documentsToAnalyze.length * 10000; // 10s per doc
+        
+        // Start simulated progress bar (40% to 95% over estimated duration)
+        let currentProgress = 40;
+        let statusMessageIndex = 0;
+        const statusMessages = [
+            '🤖 Analyse IA en cours...',
+            '📊 Analyse du contenu...',
+            '🏷️ Génération des tags...',
+            '📁 Suggestion de dossier...',
+            '✍️ Rédaction description...',
+            '🔍 Finalisation analyse...'
+        ];
+        
+        const progressInterval = setInterval(() => {
+            currentProgress += 1;
+            if (currentProgress <= 95) {
+                document.getElementById('batch-progress-bar').style.width = `${currentProgress}%`;
+                document.getElementById('batch-progress-text').textContent = `${currentProgress}%`;
+                
+                // Update status message every ~15% progress
+                if (currentProgress % 10 === 0 && statusMessageIndex < statusMessages.length - 1) {
+                    statusMessageIndex++;
+                    document.getElementById('batch-status').textContent = statusMessages[statusMessageIndex];
+                }
+            }
+        }, estimatedAIDuration / 55); // Spread 55% progress over estimated time
+        
         DEBUG.startTimer('BATCH-ANALYZE-ai-phase');
         const aiStartTime = performance.now();
         const response = await fetch('/api/admin/batch-analyze', {
@@ -4458,6 +4487,10 @@ async function startBatchAnalyze() {
         });
         
         const result = await response.json();
+        
+        // Stop simulated progress
+        clearInterval(progressInterval);
+        
         DEBUG.endTimer('BATCH-ANALYZE-ai-phase');
         const aiDuration = performance.now() - aiStartTime;
         DEBUG.perf('BATCH-ANALYZE', 'AI analysis phase', Math.round(aiDuration));
