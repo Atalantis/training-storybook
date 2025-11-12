@@ -2,6 +2,84 @@
 // ADMIN PANEL - Document Library Management
 // ==========================================
 
+// ==========================================
+// DEBUG LOGGING SYSTEM
+// ==========================================
+const DEBUG = {
+    enabled: true, // Set to false in production
+    levels: {
+        INFO: '🔵',
+        SUCCESS: '✅',
+        WARNING: '⚠️',
+        ERROR: '❌',
+        DEBUG: '🔍',
+        PERF: '⏱️'
+    },
+    
+    log: function(level, category, message, data = null) {
+        if (!this.enabled) return;
+        
+        const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+        const icon = this.levels[level] || '📝';
+        const prefix = `${icon} [${timestamp}] [${category}]`;
+        
+        if (data) {
+            console.log(`${prefix} ${message}`, data);
+        } else {
+            console.log(`${prefix} ${message}`);
+        }
+    },
+    
+    info: function(category, message, data) {
+        this.log('INFO', category, message, data);
+    },
+    
+    success: function(category, message, data) {
+        this.log('SUCCESS', category, message, data);
+    },
+    
+    warn: function(category, message, data) {
+        this.log('WARNING', category, message, data);
+    },
+    
+    error: function(category, message, data) {
+        this.log('ERROR', category, message, data);
+    },
+    
+    debug: function(category, message, data) {
+        this.log('DEBUG', category, message, data);
+    },
+    
+    perf: function(category, operation, duration) {
+        this.log('PERF', category, `${operation} completed in ${duration}ms`);
+    },
+    
+    // Timer utility
+    startTimer: function(label) {
+        if (!this.enabled) return;
+        console.time(label);
+    },
+    
+    endTimer: function(label) {
+        if (!this.enabled) return;
+        console.timeEnd(label);
+    },
+    
+    // Group logs
+    group: function(title) {
+        if (!this.enabled) return;
+        console.group(title);
+    },
+    
+    groupEnd: function() {
+        if (!this.enabled) return;
+        console.groupEnd();
+    }
+};
+
+// Expose globally for easy access
+window.DEBUG = DEBUG;
+
 let isAuthenticated = false;
 
 // Check if already authenticated
@@ -1301,6 +1379,9 @@ function formatBytes(bytes) {
 async function handleUpload(e) {
     e.preventDefault();
     
+    DEBUG.group('📤 UPLOAD PROCESS');
+    const startTime = performance.now();
+    
     const fileInput = document.getElementById('pdf-file');
     const descriptionInput = document.getElementById('pdf-description');
     const folderInput = document.getElementById('pdf-folder');
@@ -1308,16 +1389,26 @@ async function handleUpload(e) {
     const successDiv = document.getElementById('upload-success');
     
     const files = Array.from(fileInput.files);
-    if (files.length === 0) return;
+    DEBUG.info('UPLOAD', `Files selected: ${files.length}`, { 
+        files: files.map(f => ({ name: f.name, size: f.size, type: f.type }))
+    });
+    
+    if (files.length === 0) {
+        DEBUG.warn('UPLOAD', 'No files selected');
+        DEBUG.groupEnd();
+        return;
+    }
     
     // Check if batch upload (multiple files)
     const isBatch = files.length > 1;
+    DEBUG.info('UPLOAD', `Upload mode: ${isBatch ? 'BATCH' : 'SINGLE'}`);
     
     progressDiv.classList.remove('hidden');
     successDiv.classList.add('hidden');
     
     try {
         if (isBatch) {
+            DEBUG.info('BATCH-UPLOAD', 'Starting batch upload process');
             // Batch upload
             progressDiv.innerHTML = `
                 <div class="bg-blue-900 rounded-lg p-4">
@@ -1331,18 +1422,28 @@ async function handleUpload(e) {
             
             const formData = new FormData();
             files.forEach(file => {
+                DEBUG.debug('BATCH-UPLOAD', `Adding file to FormData: ${file.name} (${formatBytes(file.size)})`);
                 formData.append('files', file);
             });
             formData.append('description', descriptionInput.value);
+            DEBUG.info('BATCH-UPLOAD', `FormData prepared with ${files.length} files`);
             
+            DEBUG.startTimer('BATCH-UPLOAD-API');
+            const uploadStartTime = performance.now();
             const response = await fetch('/api/admin/batch-upload', {
                 method: 'POST',
                 body: formData
             });
+            DEBUG.endTimer('BATCH-UPLOAD-API');
             
+            DEBUG.info('BATCH-UPLOAD', `API response status: ${response.status}`);
             const data = await response.json();
+            DEBUG.info('BATCH-UPLOAD', 'API response data', data);
             
             if (data.success) {
+                const uploadDuration = performance.now() - uploadStartTime;
+                DEBUG.success('BATCH-UPLOAD', `Upload completed in ${Math.round(uploadDuration)}ms`);
+                DEBUG.info('BATCH-UPLOAD', `Results: ${data.uploaded} uploaded, ${data.failed} failed`);
                 // Update metadata for all uploaded files
                 const updatePromises = data.results.map(result => 
                     fetch(`/api/admin/documents/${result.token}/description`, {
@@ -3109,11 +3210,23 @@ async function testAIConfig() {
  * Extract text and thumbnail from PDF file
  */
 async function extractPDFContent(file, progressCallback = null, batchMode = false) {
+    const extractStartTime = performance.now();
+    DEBUG.group(`📄 EXTRACT PDF: ${file.name}`);
+    DEBUG.info('PDF-EXTRACT', `Mode: ${batchMode ? 'BATCH (fast)' : 'NORMAL'}`);
+    DEBUG.info('PDF-EXTRACT', `File size: ${formatBytes(file.size)}`);
+    
     try {
+        DEBUG.startTimer('PDF-EXTRACT-arrayBuffer');
         const arrayBuffer = await file.arrayBuffer();
+        DEBUG.endTimer('PDF-EXTRACT-arrayBuffer');
+        DEBUG.debug('PDF-EXTRACT', `ArrayBuffer size: ${formatBytes(arrayBuffer.byteLength)}`);
+        
+        DEBUG.startTimer('PDF-EXTRACT-getDocument');
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        DEBUG.endTimer('PDF-EXTRACT-getDocument');
         
         const totalPages = pdf.numPages;
+        DEBUG.info('PDF-EXTRACT', `Total pages: ${totalPages}`);
         
         // Intelligent sampling strategy based on document size
         let textPagesToExtract, ocrPagesToExtract;
@@ -3122,18 +3235,23 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
         if (batchMode) {
             textPagesToExtract = 1;  // Only first page
             ocrPagesToExtract = 0;   // NO OCR in batch mode
+            DEBUG.info('PDF-EXTRACT', '⚡ BATCH MODE: 1 page, no OCR');
         } else if (totalPages <= 5) {
             textPagesToExtract = totalPages;  // All pages
             ocrPagesToExtract = Math.min(3, totalPages);
+            DEBUG.info('PDF-EXTRACT', `Strategy: All ${totalPages} pages, OCR ${ocrPagesToExtract}`);
         } else if (totalPages <= 20) {
             textPagesToExtract = 3;  // First 3 pages
             ocrPagesToExtract = 2;
+            DEBUG.info('PDF-EXTRACT', 'Strategy: 3 pages, OCR 2');
         } else if (totalPages <= 50) {
             textPagesToExtract = 2;  // First 2 pages
             ocrPagesToExtract = 1;
+            DEBUG.info('PDF-EXTRACT', 'Strategy: 2 pages, OCR 1');
         } else {
             textPagesToExtract = 1;  // First page only
             ocrPagesToExtract = 1;
+            DEBUG.info('PDF-EXTRACT', 'Strategy: 1 page, OCR 1');
         }
         
         if (progressCallback) {
@@ -3157,23 +3275,32 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
         
         // Extract text from sampled pages
         let fullText = metaText;
+        DEBUG.startTimer('PDF-EXTRACT-text');
         
         for (let i = 1; i <= textPagesToExtract; i++) {
+            const pageStartTime = performance.now();
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
             const pageText = textContent.items.map(item => item.str).join(' ');
             fullText += `[Page ${i}/${totalPages}]\n${pageText}\n\n`;
             
+            const pageDuration = performance.now() - pageStartTime;
+            DEBUG.debug('PDF-EXTRACT', `Page ${i} text extracted in ${Math.round(pageDuration)}ms (${pageText.length} chars)`);
+            
             if (progressCallback) {
                 progressCallback(`Extraction page ${i}/${textPagesToExtract}...`, 10 + (i / textPagesToExtract) * 30);
             }
         }
+        DEBUG.endTimer('PDF-EXTRACT-text');
+        DEBUG.info('PDF-EXTRACT', `Total text extracted: ${fullText.length} characters`);
 
         // Capture first page as image
+        DEBUG.startTimer('PDF-EXTRACT-image');
         const firstPage = await pdf.getPage(1);
         // BATCH MODE: Lower resolution for faster processing
         const scale = batchMode ? 1.0 : 2.0;
         const viewport = firstPage.getViewport({ scale });
+        DEBUG.debug('PDF-EXTRACT', `Rendering image at scale ${scale} (${viewport.width}x${viewport.height})`);
         
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
@@ -3185,13 +3312,18 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
         // Convert to base64 (BATCH MODE: lower quality for speed)
         const quality = batchMode ? 0.5 : 0.7;
         const imageBase64 = canvas.toDataURL('image/jpeg', quality).split(',')[1];
+        DEBUG.endTimer('PDF-EXTRACT-image');
+        DEBUG.info('PDF-EXTRACT', `Image size: ${formatBytes(imageBase64.length * 0.75)} (quality: ${quality})`);
         
         // Check if text is empty or too short (likely scanned PDF)
         const textLength = fullText.trim().length;
         const isScanned = textLength < 100; // Less than 100 chars = probably scanned
+        DEBUG.info('PDF-EXTRACT', `Text length: ${textLength} chars, isScanned: ${isScanned}`);
         
         // SKIP OCR in batch mode (too slow)
         if (isScanned && !batchMode && ocrPagesToExtract > 0) {
+            DEBUG.warn('PDF-EXTRACT', 'Scanned PDF detected, starting OCR...');
+            DEBUG.startTimer('PDF-EXTRACT-OCR');
             if (progressCallback) {
                 progressCallback('⚠️ PDF scanné détecté, lancement OCR...', 50);
             }
@@ -3203,6 +3335,7 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
                 let ocrText = metaText;  // Keep metadata
                 
                 for (let i = 1; i <= ocrPagesToExtract; i++) {
+                    DEBUG.info('PDF-EXTRACT-OCR', `Starting OCR on page ${i}/${ocrPagesToExtract}`);
                     if (progressCallback) {
                         progressCallback(`🔍 OCR page ${i}/${ocrPagesToExtract} (sur ${totalPages} total)...`, 50 + (i / ocrPagesToExtract) * 40);
                     }
@@ -3235,13 +3368,15 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
                 }
                 
                 fullText = ocrText.trim();
-                console.log('OCR completed, extracted ' + fullText.length + ' characters');
+                DEBUG.endTimer('PDF-EXTRACT-OCR');
+                DEBUG.success('PDF-EXTRACT-OCR', `OCR completed: ${fullText.length} characters extracted`);
                 
                 if (progressCallback) {
                     progressCallback('✅ OCR terminé !', 95);
                 }
                 
             } catch (ocrError) {
+                DEBUG.error('PDF-EXTRACT-OCR', 'OCR failed', ocrError);
                 console.error('OCR Error:', ocrError);
                 if (progressCallback) {
                     progressCallback('⚠️ OCR échoué, analyse avec image seule...', 95);
@@ -3249,6 +3384,9 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
                 // Continue with empty text, AI will use image only
             }
         } else {
+            if (batchMode && isScanned) {
+                DEBUG.warn('PDF-EXTRACT', 'Scanned PDF in batch mode: OCR skipped');
+            }
             if (progressCallback) {
                 progressCallback('✅ Texte natif extrait !', 95);
             }
@@ -3260,6 +3398,12 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
         
         // Limit text to 3000 characters for API efficiency
         const trimmedText = fullText.substring(0, 3000);
+        DEBUG.info('PDF-EXTRACT', `Final text length: ${trimmedText.length} chars (trimmed from ${fullText.length})`);
+        
+        const totalDuration = performance.now() - extractStartTime;
+        DEBUG.perf('PDF-EXTRACT', file.name, Math.round(totalDuration));
+        DEBUG.success('PDF-EXTRACT', `Extraction completed in ${Math.round(totalDuration)}ms`);
+        DEBUG.groupEnd();
         
         return { 
             text: trimmedText, 
@@ -3269,6 +3413,9 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
             sampledPages: isScanned ? ocrPagesToExtract : textPagesToExtract
         };
     } catch (error) {
+        const totalDuration = performance.now() - extractStartTime;
+        DEBUG.error('PDF-EXTRACT', `Extraction failed after ${Math.round(totalDuration)}ms`, error);
+        DEBUG.groupEnd();
         console.error('PDF extraction error:', error);
         throw error;
     }
@@ -3685,9 +3832,15 @@ function toggleUploadSplitOptions() {
 }
 
 async function startBatchAnalyze() {
+    DEBUG.group('🤖 BATCH ANALYZE');
+    const batchStartTime = performance.now();
+    
     const checkboxes = Array.from(document.querySelectorAll('.batch-doc-checkbox:checked'));
+    DEBUG.info('BATCH-ANALYZE', `Documents selected: ${checkboxes.length}`);
     
     if (checkboxes.length === 0) {
+        DEBUG.warn('BATCH-ANALYZE', 'No documents selected');
+        DEBUG.groupEnd();
         alert('Veuillez sélectionner au moins un document');
         return;
     }
@@ -3704,11 +3857,14 @@ async function startBatchAnalyze() {
     try {
         // Prepare documents for batch analysis
         const documentsToAnalyze = [];
+        DEBUG.startTimer('BATCH-ANALYZE-extraction-phase');
         
         for (let i = 0; i < checkboxes.length; i++) {
             const cb = checkboxes[i];
             const token = cb.value;
             const filename = cb.dataset.filename;
+            
+            DEBUG.info('BATCH-ANALYZE', `[${i+1}/${checkboxes.length}] Processing: ${filename}`);
             
             document.getElementById('batch-status').textContent = `Extraction du contenu ${i + 1}/${checkboxes.length}...`;
             document.getElementById('batch-progress-text').textContent = `${i} / ${checkboxes.length}`;
@@ -3716,18 +3872,26 @@ async function startBatchAnalyze() {
             
             // Fetch PDF from R2
             document.getElementById('batch-status').textContent = `📥 Téléchargement ${filename}...`;
+            DEBUG.startTimer(`BATCH-download-${i}`);
+            const downloadStartTime = performance.now();
             const pdfResponse = await fetch(`/view?doc=${token}&download=1`);
             const pdfBlob = await pdfResponse.blob();
             const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
+            DEBUG.endTimer(`BATCH-download-${i}`);
+            const downloadDuration = performance.now() - downloadStartTime;
+            DEBUG.perf('BATCH-ANALYZE', `Download ${filename}`, Math.round(downloadDuration));
             
             // Extract content with progress callback
             const progressCallback = (message, percent) => {
                 document.getElementById('batch-status').textContent = `[${i + 1}/${checkboxes.length}] ${message}`;
-                console.log(`[Batch ${i + 1}/${checkboxes.length}] ${message} - ${percent}%`);
+                DEBUG.debug('BATCH-ANALYZE', `[${i+1}/${checkboxes.length}] ${message} (${percent}%)`);
             };
             
             document.getElementById('batch-status').textContent = `[${i + 1}/${checkboxes.length}] 🔍 Extraction rapide (1 page)...`;
+            const extractionStartTime = performance.now();
             const { text, imageBase64, isScanned, totalPages, sampledPages } = await extractPDFContent(pdfFile, progressCallback, true); // true = batch mode (fast)
+            const extractionDuration = performance.now() - extractionStartTime;
+            DEBUG.perf('BATCH-ANALYZE', `Extract ${filename}`, Math.round(extractionDuration));
             
             documentsToAnalyze.push({
                 documentId: token,
@@ -3743,8 +3907,18 @@ async function startBatchAnalyze() {
         }
         
         // Send to batch analyze endpoint
-        document.getElementById('batch-status').textContent = 'Envoi à l\'IA...';
+        DEBUG.endTimer('BATCH-ANALYZE-extraction-phase');
+        const extractionPhaseDuration = performance.now() - batchStartTime;
+        DEBUG.perf('BATCH-ANALYZE', 'Extraction phase', Math.round(extractionPhaseDuration));
         
+        document.getElementById('batch-status').textContent = 'Envoi à l\'IA...';
+        DEBUG.info('BATCH-ANALYZE', 'Sending to AI API', { 
+            documentsCount: documentsToAnalyze.length,
+            totalTextLength: documentsToAnalyze.reduce((sum, doc) => sum + doc.text.length, 0)
+        });
+        
+        DEBUG.startTimer('BATCH-ANALYZE-ai-phase');
+        const aiStartTime = performance.now();
         const response = await fetch('/api/admin/batch-analyze', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -3752,8 +3926,14 @@ async function startBatchAnalyze() {
         });
         
         const result = await response.json();
+        DEBUG.endTimer('BATCH-ANALYZE-ai-phase');
+        const aiDuration = performance.now() - aiStartTime;
+        DEBUG.perf('BATCH-ANALYZE', 'AI analysis phase', Math.round(aiDuration));
+        DEBUG.info('BATCH-ANALYZE', 'AI response', result);
         
         if (result.success) {
+            DEBUG.success('BATCH-ANALYZE', `Analysis completed: ${result.analyzed} success, ${result.failed} failed`);
+            
             // Update progress
             document.getElementById('batch-status').textContent = 'Terminé !';
             document.getElementById('batch-progress-text').textContent = `${result.analyzed} / ${result.total}`;
@@ -3762,23 +3942,35 @@ async function startBatchAnalyze() {
             // Show results
             detailsDiv.innerHTML = '<div class="mt-2 pt-2 border-t border-gray-600"></div>';
             result.results.forEach(res => {
+                DEBUG.debug('BATCH-ANALYZE', `Success: ${res.filename}`, res.suggestions);
                 detailsDiv.innerHTML += `<div class="text-sm text-green-400"><i class="fas fa-check-circle mr-2"></i>Analysé: ${res.filename}</div>`;
             });
             result.errors.forEach(err => {
+                DEBUG.error('BATCH-ANALYZE', `Failed: ${err.filename}`, err.error);
                 detailsDiv.innerHTML += `<div class="text-sm text-red-400"><i class="fas fa-times-circle mr-2"></i>Erreur: ${err.filename} - ${err.error}</div>`;
             });
             
             // Reload documents
             await loadDocuments();
             
+            const totalDuration = performance.now() - batchStartTime;
+            DEBUG.perf('BATCH-ANALYZE', 'Total batch process', Math.round(totalDuration));
+            DEBUG.success('BATCH-ANALYZE', `Batch analysis completed in ${Math.round(totalDuration)}ms`);
+            DEBUG.groupEnd();
+            
             setTimeout(() => {
                 alert(`✅ Analyse terminée !\n\n✅ ${result.analyzed} documents analysés\n❌ ${result.failed} échecs`);
                 closeBatchAnalyze();
             }, 2000);
         } else {
+            DEBUG.error('BATCH-ANALYZE', 'Batch analysis failed', result.error);
+            DEBUG.groupEnd();
             alert('Erreur: ' + result.error);
         }
     } catch (error) {
+        const totalDuration = performance.now() - batchStartTime;
+        DEBUG.error('BATCH-ANALYZE', `Batch analyze error after ${Math.round(totalDuration)}ms`, error);
+        DEBUG.groupEnd();
         console.error('Batch analyze error:', error);
         alert('❌ Erreur lors de l\'analyse par lot');
     } finally {
