@@ -3746,11 +3746,12 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
         // Intelligent sampling strategy based on document size
         let textPagesToExtract, ocrPagesToExtract;
         
-        // BATCH MODE: Ultra-light extraction (1 page only, no OCR)
+        // BATCH MODE: Smart sampling - extract more pages if needed to get enough text
         if (batchMode) {
-            textPagesToExtract = 1;  // Only first page
-            ocrPagesToExtract = 0;   // NO OCR in batch mode
-            DEBUG.info('PDF-EXTRACT', '⚡ BATCH MODE: 1 page, no OCR');
+            // Start with 1 page, will sample more if text is insufficient
+            textPagesToExtract = Math.min(5, totalPages);  // Maximum 5 pages in batch mode
+            ocrPagesToExtract = 0;   // NO OCR in batch mode (too slow)
+            DEBUG.info('PDF-EXTRACT', `⚡ BATCH MODE: up to ${textPagesToExtract} pages, no OCR`);
         } else if (totalPages <= 5) {
             textPagesToExtract = totalPages;  // All pages
             ocrPagesToExtract = Math.min(3, totalPages);
@@ -3792,12 +3793,17 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
         let fullText = metaText;
         DEBUG.startTimer('PDF-EXTRACT-text');
         
+        // Minimum text threshold for batch mode (300 chars = ~50 words)
+        const minTextThreshold = batchMode ? 300 : 0;
+        let actualPagesExtracted = 0;
+        
         for (let i = 1; i <= textPagesToExtract; i++) {
             const pageStartTime = performance.now();
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
             const pageText = textContent.items.map(item => item.str).join(' ');
             fullText += `[Page ${i}/${totalPages}]\n${pageText}\n\n`;
+            actualPagesExtracted = i;
             
             const pageDuration = performance.now() - pageStartTime;
             DEBUG.debug('PDF-EXTRACT', `Page ${i} text extracted in ${Math.round(pageDuration)}ms (${pageText.length} chars)`);
@@ -3805,9 +3811,15 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
             if (progressCallback) {
                 progressCallback(`Extraction page ${i}/${textPagesToExtract}...`, 10 + (i / textPagesToExtract) * 30);
             }
+            
+            // In batch mode, stop early if we have enough text
+            if (batchMode && fullText.length >= minTextThreshold) {
+                DEBUG.info('PDF-EXTRACT', `✅ Sufficient text found after ${i} pages (${fullText.length} chars)`);
+                break;
+            }
         }
         DEBUG.endTimer('PDF-EXTRACT-text');
-        DEBUG.info('PDF-EXTRACT', `Total text extracted: ${fullText.length} characters`);
+        DEBUG.info('PDF-EXTRACT', `Total text extracted: ${fullText.length} characters from ${actualPagesExtracted} pages`);
 
         // Capture first page as image
         DEBUG.startTimer('PDF-EXTRACT-image');
@@ -3925,7 +3937,7 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
             imageBase64,
             isScanned,
             totalPages,
-            sampledPages: isScanned ? ocrPagesToExtract : textPagesToExtract
+            sampledPages: isScanned && !batchMode ? ocrPagesToExtract : actualPagesExtracted
         };
     } catch (error) {
         const totalDuration = performance.now() - extractStartTime;
