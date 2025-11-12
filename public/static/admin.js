@@ -683,8 +683,8 @@ function showAdminPanel() {
                         </div>
                     </div>
                 </div>
-                </div>
                 <!-- End library-content -->
+                </div>
                 
                 <!-- Converter Tab Content (hidden by default) -->
                 <div id="converter-content" class="hidden"></div>
