@@ -4519,12 +4519,20 @@ async function startBatchAnalyze() {
                 
                 const resultId = `batch-result-${index}`;
                 
+                // Extract suggestions from nested structure
+                const suggestions = res.suggestions || {};
+                
                 detailsDiv.innerHTML += `
                     <div class="bg-gray-800 rounded-lg p-4 mb-3" id="${resultId}" data-suggestions='${JSON.stringify(res).replace(/'/g, "&#39;")}'>
                         <div class="flex items-start justify-between gap-3 mb-2">
                             <div class="flex-1">
-                                <p class="text-white font-medium">${res.filename}</p>
-                                <p class="text-sm text-gray-400 mt-1">${res.description?.substring(0, 100)}...</p>
+                                <p class="text-white font-medium text-sm mb-1">
+                                    <span class="text-gray-400">Original:</span> ${res.filename}
+                                </p>
+                                <p class="text-blue-300 font-medium mb-2">
+                                    <i class="fas fa-arrow-right mr-2"></i>${suggestions.filename || res.filename}
+                                </p>
+                                <p class="text-sm text-gray-400 mt-1">${suggestions.description?.substring(0, 100) || 'Pas de description'}...</p>
                             </div>
                             <button 
                                 onclick="applyBatchSuggestions('${resultId}')"
@@ -4534,9 +4542,10 @@ async function startBatchAnalyze() {
                             </button>
                         </div>
                         <div class="flex flex-wrap gap-2 mt-2">
-                            ${res.tags?.slice(0, 3).map(tag => 
+                            ${suggestions.tags?.slice(0, 3).map(tag => 
                                 `<span class="px-2 py-1 bg-blue-900 text-blue-200 text-xs rounded">${tag}</span>`
-                            ).join('') || ''}
+                            ).join('') || '<span class="text-sm text-gray-500">Pas de tags</span>'}
+                            ${suggestions.folder ? `<span class="px-2 py-1 bg-purple-900 text-purple-200 text-xs rounded"><i class="fas fa-folder mr-1"></i>${suggestions.folder}</span>` : ''}
                         </div>
                     </div>
                 `;
@@ -4596,11 +4605,22 @@ async function applyBatchSuggestions(resultId) {
     try {
         // Get suggestions from data attribute
         const resultDiv = document.getElementById(resultId);
-        const suggestions = JSON.parse(resultDiv.dataset.suggestions);
+        const data = JSON.parse(resultDiv.dataset.suggestions);
         
-        DEBUG.info('APPLY-SUGGESTIONS', 'Applying', suggestions);
+        // Extract suggestions from nested structure
+        // API returns: { success, filename, documentId, suggestions: { filename, description, tags, folder } }
+        const suggestions = data.suggestions || data;
         
-        const response = await fetch(`/api/admin/documents/${suggestions.documentId}/description`, {
+        DEBUG.info('APPLY-SUGGESTIONS', 'Applying suggestions', {
+            documentId: data.documentId,
+            originalFilename: data.filename,
+            newFilename: suggestions.filename,
+            description: suggestions.description,
+            tags: suggestions.tags,
+            folder: suggestions.folder
+        });
+        
+        const response = await fetch(`/api/admin/documents/${data.documentId}/description`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
