@@ -4394,7 +4394,7 @@ async function startBatchAnalyze() {
             document.getElementById('batch-status').textContent = `📥 Téléchargement ${filename}...`;
             DEBUG.startTimer(`BATCH-download-${i}`);
             const downloadStartTime = performance.now();
-            const pdfResponse = await fetch(`/view?doc=${token}&download=1`);
+            const pdfResponse = await fetch(`/api/documents/${token}`);
             const pdfBlob = await pdfResponse.blob();
             const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
             DEBUG.endTimer(`BATCH-download-${i}`);
