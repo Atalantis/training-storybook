@@ -3159,6 +3159,55 @@ async function bulkDeleteDocuments() {
         }
     }
     
+    // Restore original bar content (since we replaced it with loading message)
+    bar.innerHTML = `
+        <div class="flex items-center gap-4">
+            <div class="text-white font-semibold flex items-center gap-2">
+                <i class="fas fa-check-circle"></i>
+                <span id="selected-count">0</span> document(s) sélectionné(s)
+            </div>
+            
+            <div class="h-8 w-px bg-white/30"></div>
+            
+            <div class="flex gap-2">
+                <button 
+                    onclick="bulkEditDocuments()"
+                    class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                    title="Modifier les documents sélectionnés"
+                >
+                    <i class="fas fa-edit"></i>
+                    Modifier
+                </button>
+                
+                <button 
+                    onclick="bulkMoveDocuments()"
+                    class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                    title="Déplacer vers un dossier"
+                >
+                    <i class="fas fa-folder"></i>
+                    Déplacer
+                </button>
+                
+                <button 
+                    onclick="bulkDeleteDocuments()"
+                    class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                    title="Supprimer les documents sélectionnés"
+                >
+                    <i class="fas fa-trash"></i>
+                    Supprimer
+                </button>
+                
+                <button 
+                    onclick="clearSelection()"
+                    class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition font-semibold"
+                    title="Annuler la sélection"
+                >
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    `;
+    
     // Clear selection (this will hide the bar via updateBulkActionsBar)
     clearSelection();
     
@@ -3170,11 +3219,6 @@ async function bulkDeleteDocuments() {
         alert(`✅ ${successCount} document(s) supprimé(s) avec succès !`);
     } else {
         alert(`⚠️ Résultat:\n\n✅ ${successCount} document(s) supprimé(s)\n❌ ${errorCount} erreur(s)`);
-    }
-    
-    // Ensure bar is hidden (double-check) - reuse bar variable
-    if (bar) {
-        bar.classList.add('hidden');
     }
 }
 
