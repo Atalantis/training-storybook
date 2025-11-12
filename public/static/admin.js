@@ -3393,7 +3393,7 @@ async function submitBulkEdit() {
             // Prepare update data
             const updateData = {
                 description: doc.description || '',
-                tags: JSON.stringify(updatedTags)
+                tags: updatedTags  // Send as array, backend will stringify
             };
             
             // Only update folder if provided
@@ -3402,6 +3402,8 @@ async function submitBulkEdit() {
             } else {
                 updateData.folder = doc.folder || '';
             }
+            
+            console.log(`🔵 [BULK-EDIT] Updating ${token}:`, updateData);
             
             const response = await fetch(`/api/admin/documents/${token}/description`, {
                 method: 'PATCH',
