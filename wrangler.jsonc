@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "training-storybook",
+  "compatibility_date": "2025-11-09",
+  "pages_build_output_dir": "./dist",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "DOCUMENTS",
+      "id": "<YOUR_KV_NAMESPACE_ID>"  // ⬅️ Replace with your KV namespace ID from: npx wrangler kv:namespace create DOCUMENTS
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "PDFS",
+      "bucket_name": "storybook-pdfs"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "training-storybook-library",
+      "database_id": "<YOUR_D1_DATABASE_ID>"  // ⬅️ Replace with your D1 database ID from: npx wrangler d1 create training-storybook-library
+    }
+  ]
+}
