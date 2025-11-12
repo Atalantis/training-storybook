@@ -625,11 +625,12 @@ app.get('/api/documents/:token', async (c) => {
       return c.json({ success: false, error: 'PDF file not found' }, 404)
     }
     
-    // Return PDF
+    // Return PDF with RFC 5987 encoded filename for Unicode support
+    const encodedFilename = encodeURIComponent(doc.filename)
     return new Response(object.body, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="${doc.filename}"`,
+        'Content-Disposition': `inline; filename="${doc.filename}"; filename*=UTF-8''${encodedFilename}`,
         'Cache-Control': 'public, max-age=31536000'
       }
     })
@@ -2304,7 +2305,7 @@ app.get('/admin', (c) => {
     </head>
     <body>
         <div id="app"></div>
-        <script src="/static/admin.js"></script>
+        <script src="/static/admin.js?v=${Date.now()}"></script>
     </body>
     </html>
   `)

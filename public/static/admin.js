@@ -228,6 +228,204 @@ function shouldCompressPDF(file) {
     return file.size > threshold;
 }
 
+// ==========================================
+// PDF PAGE SPLITTING - Conditional split based on format
+// ==========================================
+/**
+ * Split PDF pages conditionally based on user options
+ * @param {Object} sourcePdf - PDF.js document object
+ * @param {Object} options - Split options
+ * @param {string} options.pageFormat - 'single' or 'double'
+ * @param {boolean} options.removeFirstLeft - Remove left part of first page (only if double)
+ * @param {boolean} options.skipFirstPage - Skip entire first page
+ * @param {number} options.quality - JPEG quality (0.1 to 1.0)
+ * @returns {Object} { pdfDoc: PDFDocument, stats: Object }
+ */
+async function splitPDFPages(sourcePdf, options = {}) {
+    DEBUG.group('📄 SPLIT PDF PAGES');
+    DEBUG.startTimer('Total Split Duration');
+    
+    const {
+        pageFormat = 'double',
+        removeFirstLeft = false,
+        skipFirstPage = false,
+        quality = 0.9
+    } = options;
+    
+    DEBUG.log('INFO', 'SPLIT_OPTIONS', 'Configuration', {
+        pageFormat,
+        removeFirstLeft,
+        skipFirstPage,
+        quality,
+        totalPages: sourcePdf.numPages
+    });
+    
+    const pageCount = sourcePdf.numPages;
+    const startPage = skipFirstPage ? 2 : 1;
+    const totalPages = skipFirstPage ? pageCount - 1 : pageCount;
+    
+    // Create new PDF for output
+    const newPdfDoc = await PDFLib.PDFDocument.create();
+    
+    let processedPages = 0;
+    let skippedFirstLeft = false;
+    
+    // Process each page
+    for (let i = startPage; i <= pageCount; i++) {
+        DEBUG.group(`📄 Page ${i}/${pageCount}`);
+        DEBUG.startTimer(`Page ${i} Processing`);
+        
+        const page = await sourcePdf.getPage(i);
+        
+        // Use high scale for maximum quality (4.0 = 4x resolution)
+        const viewport = page.getViewport({ scale: 4.0 });
+        
+        const width = viewport.width;
+        const height = viewport.height;
+        const halfWidth = width / 2;
+        
+        // Get original page size in points for PDF
+        const originalViewport = page.getViewport({ scale: 1.0 });
+        const pdfWidth = originalViewport.width;
+        const pdfHeight = originalViewport.height;
+        const pdfHalfWidth = pdfWidth / 2;
+        
+        DEBUG.log('DEBUG', 'PAGE_DIMENSIONS', `Page ${i}`, {
+            renderWidth: width,
+            renderHeight: height,
+            pdfWidth: pdfWidth.toFixed(2),
+            pdfHeight: pdfHeight.toFixed(2),
+            pdfHalfWidth: pdfHalfWidth.toFixed(2)
+        });
+        
+        // Render full page to canvas at high resolution
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        
+        DEBUG.startTimer(`Page ${i} Render`);
+        await page.render({
+            canvasContext: ctx,
+            viewport: viewport
+        }).promise;
+        DEBUG.endTimer(`Page ${i} Render`);
+        
+        // CONDITIONAL SPLIT LOGIC
+        if (pageFormat === 'single') {
+            // NO SPLIT - Keep page as is
+            DEBUG.log('INFO', 'NO_SPLIT', `Page ${i} kept as single page`, null);
+            
+            const imageData = canvas.toDataURL('image/jpeg', quality);
+            const imageBytes = await fetch(imageData).then(res => res.arrayBuffer());
+            const image = await newPdfDoc.embedJpg(imageBytes);
+            
+            const newPage = newPdfDoc.addPage([pdfWidth, pdfHeight]);
+            newPage.drawImage(image, {
+                x: 0,
+                y: 0,
+                width: pdfWidth,
+                height: pdfHeight,
+            });
+            
+            processedPages += 1;
+            
+        } else if (pageFormat === 'double') {
+            // SPLIT INTO TWO PAGES
+            DEBUG.log('INFO', 'SPLIT_MODE', `Page ${i} splitting into 2 halves`, {
+                firstPage: i === startPage,
+                removeFirstLeft: removeFirstLeft && i === startPage
+            });
+            
+            // Check if we should skip left half of first page
+            const shouldSkipLeft = (i === startPage && removeFirstLeft);
+            
+            if (shouldSkipLeft) {
+                DEBUG.log('WARNING', 'SKIP_FIRST_LEFT', `Skipping LEFT half of page ${i}`, null);
+                skippedFirstLeft = true;
+            }
+            
+            // Extract left half (unless skipped)
+            if (!shouldSkipLeft) {
+                DEBUG.startTimer(`Page ${i} Left Half`);
+                
+                const leftCanvas = document.createElement('canvas');
+                leftCanvas.width = halfWidth;
+                leftCanvas.height = height;
+                const leftCtx = leftCanvas.getContext('2d');
+                leftCtx.drawImage(canvas, 0, 0, halfWidth, height, 0, 0, halfWidth, height);
+                
+                const leftImageData = leftCanvas.toDataURL('image/jpeg', quality);
+                const leftImageBytes = await fetch(leftImageData).then(res => res.arrayBuffer());
+                const leftImage = await newPdfDoc.embedJpg(leftImageBytes);
+                
+                const leftPage = newPdfDoc.addPage([pdfHalfWidth, pdfHeight]);
+                leftPage.drawImage(leftImage, {
+                    x: 0,
+                    y: 0,
+                    width: pdfHalfWidth,
+                    height: pdfHeight,
+                });
+                
+                processedPages += 1;
+                DEBUG.endTimer(`Page ${i} Left Half`);
+                DEBUG.log('SUCCESS', 'LEFT_HALF', `Page ${i} left half created`, null);
+            }
+            
+            // Extract right half (always)
+            DEBUG.startTimer(`Page ${i} Right Half`);
+            
+            const rightCanvas = document.createElement('canvas');
+            rightCanvas.width = halfWidth;
+            rightCanvas.height = height;
+            const rightCtx = rightCanvas.getContext('2d');
+            rightCtx.drawImage(canvas, halfWidth, 0, halfWidth, height, 0, 0, halfWidth, height);
+            
+            const rightImageData = rightCanvas.toDataURL('image/jpeg', quality);
+            const rightImageBytes = await fetch(rightImageData).then(res => res.arrayBuffer());
+            const rightImage = await newPdfDoc.embedJpg(rightImageBytes);
+            
+            const rightPage = newPdfDoc.addPage([pdfHalfWidth, pdfHeight]);
+            rightPage.drawImage(rightImage, {
+                x: 0,
+                y: 0,
+                width: pdfHalfWidth,
+                height: pdfHeight,
+            });
+            
+            processedPages += 1;
+            DEBUG.endTimer(`Page ${i} Right Half`);
+            DEBUG.log('SUCCESS', 'RIGHT_HALF', `Page ${i} right half created`, null);
+        }
+        
+        DEBUG.endTimer(`Page ${i} Processing`);
+        DEBUG.groupEnd();
+        
+        // Update progress callback if provided
+        const progress = Math.round(((i - startPage + 1) / totalPages) * 100);
+        if (options.progressCallback) {
+            options.progressCallback(progress, i, totalPages);
+        }
+    }
+    
+    DEBUG.endTimer('Total Split Duration');
+    
+    const stats = {
+        sourcePages: pageCount,
+        processedPages: totalPages,
+        outputPages: processedPages,
+        skippedFirstPage: skipFirstPage,
+        skippedFirstLeft: skippedFirstLeft,
+        pageFormat: pageFormat,
+        quality: quality
+    };
+    
+    DEBUG.log('SUCCESS', 'SPLIT_COMPLETE', 'PDF split completed', stats);
+    DEBUG.groupEnd();
+    
+    return { pdfDoc: newPdfDoc, stats };
+}
+
 let isAuthenticated = false;
 
 // Check if already authenticated
@@ -1149,132 +1347,111 @@ async function handleConversion(e) {
     progressDiv.classList.remove('hidden');
     
     try {
-        const file = fileInput.files[0];
+        DEBUG.group('🔧 CONVERTER PROCESS START');
+        
+        let file = fileInput.files[0];
         if (!file) {
             throw new Error('Veuillez sélectionner un fichier PDF');
         }
         
-        // Get options
+        const originalFileSize = file.size;
+        
+        DEBUG.log('INFO', 'FILE_INFO', 'Selected file', {
+            name: file.name,
+            size: (file.size / 1024 / 1024).toFixed(2) + ' MB',
+            type: file.type
+        });
+        
+        // Get user options from UI
+        const convertPageFormat = document.querySelector('input[name="page-format"]:checked')?.value || 'double';
+        const convertRemoveFirstLeft = document.getElementById('remove-first-left')?.checked || false;
         const skipFirstPage = document.getElementById('skip-first-page').checked;
         const quality = parseFloat(document.getElementById('quality-select').value);
         
-        // Read PDF with pdf.js
+        DEBUG.log('INFO', 'USER_OPTIONS', 'Conversion options', {
+            pageFormat: convertPageFormat,
+            removeFirstLeft: convertRemoveFirstLeft,
+            skipFirstPage,
+            quality
+        });
+        
+        // STEP 1: COMPRESSION (if file is large)
+        if (shouldCompressPDF(file)) {
+            const progressText = progressDiv.querySelector('.text-white');
+            if (progressText) {
+                progressText.textContent = '🗜️ Compression en cours...';
+            }
+            
+            DEBUG.log('INFO', 'CONVERTER_COMPRESS', 'Starting compression', {
+                originalSize: (originalFileSize / 1024 / 1024).toFixed(2) + ' MB'
+            });
+            
+            const progressCallback = (message, percent) => {
+                if (progressText) {
+                    progressText.textContent = message;
+                }
+            };
+            
+            const { compressedFile, originalSize, compressedSize, compressionRatio } = await compressPDF(file, progressCallback);
+            
+            file = compressedFile;
+            
+            DEBUG.log('SUCCESS', 'CONVERTER_COMPRESS', 'Compression completed', {
+                originalSize: (originalSize / 1024 / 1024).toFixed(2) + ' MB',
+                compressedSize: (compressedSize / 1024 / 1024).toFixed(2) + ' MB',
+                ratio: compressionRatio + '%'
+            });
+        }
+        
+        // STEP 2: Read PDF with pdf.js
         const arrayBuffer = await file.arrayBuffer();
         const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
         const sourcePdf = await loadingTask.promise;
         
         const pageCount = sourcePdf.numPages;
         
-        console.log(`Converting PDF: ${pageCount} pages (quality: ${quality}), skip first: ${skipFirstPage}`);
-        
-        // Create new PDF for A5 booklet format
-        const newPdfDoc = await PDFLib.PDFDocument.create();
-        
-        // Array to store all A5 pages before conditionally removing first
-        const a5Pages = [];
-        
-        // Process each page - split A3 into 2 A5 pages
-        for (let i = 1; i <= pageCount; i++) {
-            const page = await sourcePdf.getPage(i);
-            
-            // Use high scale for maximum quality (4.0 = 4x resolution)
-            const viewport = page.getViewport({ scale: 4.0 });
-            
-            const width = viewport.width;
-            const height = viewport.height;
-            const halfWidth = width / 2;
-            
-            // Get original page size in points for PDF
-            const originalViewport = page.getViewport({ scale: 1.0 });
-            const pdfWidth = originalViewport.width;
-            const pdfHeight = originalViewport.height;
-            const pdfHalfWidth = pdfWidth / 2;
-            
-            console.log(`Page ${i}: ${pdfWidth.toFixed(2)} x ${pdfHeight.toFixed(2)} pts`);
-            
-            // Render full page to canvas at high resolution
-            const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            
-            await page.render({
-                canvasContext: ctx,
-                viewport: viewport
-            }).promise;
-            
-            // Extract left half
-            const leftCanvas = document.createElement('canvas');
-            leftCanvas.width = halfWidth;
-            leftCanvas.height = height;
-            const leftCtx = leftCanvas.getContext('2d');
-            leftCtx.drawImage(canvas, 0, 0, halfWidth, height, 0, 0, halfWidth, height);
-            
-            // Extract right half
-            const rightCanvas = document.createElement('canvas');
-            rightCanvas.width = halfWidth;
-            rightCanvas.height = height;
-            const rightCtx = rightCanvas.getContext('2d');
-            rightCtx.drawImage(canvas, halfWidth, 0, halfWidth, height, 0, 0, halfWidth, height);
-            
-            // Convert left to JPEG with selected quality
-            const leftImageData = leftCanvas.toDataURL('image/jpeg', quality);
-            const leftImageBytes = await fetch(leftImageData).then(res => res.arrayBuffer());
-            const leftImage = await newPdfDoc.embedJpg(leftImageBytes);
-            
-            // Store left page data
-            a5Pages.push({
-                image: leftImage,
-                width: pdfHalfWidth,
-                height: pdfHeight
-            });
-            
-            // Convert right to JPEG
-            const rightImageData = rightCanvas.toDataURL('image/jpeg', quality);
-            const rightImageBytes = await fetch(rightImageData).then(res => res.arrayBuffer());
-            const rightImage = await newPdfDoc.embedJpg(rightImageBytes);
-            
-            // Store right page data
-            a5Pages.push({
-                image: rightImage,
-                width: pdfHalfWidth,
-                height: pdfHeight
-            });
-            
-            // Update progress
-            const progress = Math.round((i / pageCount) * 100);
-            const progressText = progressDiv.querySelector('.text-white');
-            if (progressText) {
-                progressText.textContent = `Conversion en cours... ${progress}%`;
+        // Use the splitPDFPages function with progress callback
+        const { pdfDoc: newPdfDoc, stats } = await splitPDFPages(sourcePdf, {
+            pageFormat: convertPageFormat,
+            removeFirstLeft: convertRemoveFirstLeft,
+            skipFirstPage: skipFirstPage,
+            quality: quality,
+            progressCallback: (progress, currentPage, total) => {
+                const progressText = progressDiv.querySelector('.text-white');
+                if (progressText) {
+                    progressText.textContent = `Conversion en cours... ${progress}% (page ${currentPage}/${total})`;
+                }
             }
-        }
+        });
         
-        // Now add pages to PDF, skipping first if requested
-        const startIndex = skipFirstPage ? 1 : 0;
-        const finalPageCount = a5Pages.length - startIndex;
-        
-        console.log(`Total A5 pages: ${a5Pages.length}, starting from index ${startIndex}, final count: ${finalPageCount}`);
-        
-        for (let i = startIndex; i < a5Pages.length; i++) {
-            const pageData = a5Pages[i];
-            const page = newPdfDoc.addPage([pageData.width, pageData.height]);
-            page.drawImage(pageData.image, {
-                x: 0,
-                y: 0,
-                width: pageData.width,
-                height: pageData.height,
-            });
-        }
+        DEBUG.log('SUCCESS', 'SPLIT_STATS', 'Split statistics', stats);
         
         // Save the PDF
+        DEBUG.startTimer('PDF Save');
         const pdfBytes = await newPdfDoc.save();
+        DEBUG.endTimer('PDF Save');
+        
         convertedPDFBlob = new Blob([pdfBytes], { type: 'application/pdf' });
         convertedFilename = file.name.replace('.pdf', '_livret_A5.pdf');
         
         const fileSizeMB = (pdfBytes.length / 1024 / 1024).toFixed(2);
-        const originalSizeMB = (arrayBuffer.byteLength / 1024 / 1024).toFixed(2);
+        const originalSizeMB = (originalFileSize / 1024 / 1024).toFixed(2);
+        const finalSizeMB = (pdfBytes.length / 1024 / 1024).toFixed(2);
+        const totalCompressionRatio = ((1 - pdfBytes.length / originalFileSize) * 100).toFixed(1);
         
-        console.log(`Conversion completed: ${finalPageCount} pages, ${fileSizeMB} MB${skipFirstPage ? ' (première page A5 supprimée)' : ''}`);
+        DEBUG.log('SUCCESS', 'FILE_SIZES', 'Size comparison', {
+            original: originalSizeMB + ' MB',
+            final: finalSizeMB + ' MB',
+            totalCompression: totalCompressionRatio + '%',
+            outputPages: stats.outputPages
+        });
+        
+        const pageText = convertPageFormat === 'single' 
+            ? `${stats.outputPages} pages conservées`
+            : `${stats.outputPages} pages créées`;
+        
+        DEBUG.log('SUCCESS', 'CONVERTER_COMPLETE', 'Conversion process finished successfully', null);
+        DEBUG.groupEnd();
         
         // Hide progress, show success
         progressDiv.classList.add('hidden');
@@ -1576,13 +1753,24 @@ async function handleUpload(e) {
             const statusSpan = document.getElementById('batch-upload-status');
             const detailsDiv = document.getElementById('batch-progress-details');
             
-            // Compress large files first
+            // Get upload split options from UI
+            const uploadPageFormat = document.querySelector('input[name="upload-page-format"]:checked')?.value || 'single';
+            const uploadRemoveFirstLeft = document.getElementById('upload-remove-first-left')?.checked || false;
+            
+            DEBUG.log('INFO', 'BATCH-UPLOAD-OPTIONS', 'Split options', {
+                pageFormat: uploadPageFormat,
+                removeFirstLeft: uploadRemoveFirstLeft
+            });
+            
+            // Process files: Compress → Split
             const processedFiles = [];
             let totalSaved = 0;
             
             for (let i = 0; i < files.length; i++) {
-                const file = files[i];
+                let file = files[i];
+                const originalFileSize = file.size;
                 
+                // STEP 1: COMPRESSION (if needed)
                 if (shouldCompressPDF(file)) {
                     statusSpan.textContent = `🗜️ Compression ${i + 1}/${files.length}: ${file.name}...`;
                     detailsDiv.innerHTML += `<div class="text-sm text-yellow-300">🗜️ Compression: ${file.name} (${formatBytes(file.size)})</div>`;
@@ -1593,14 +1781,46 @@ async function handleUpload(e) {
                     
                     const { compressedFile, originalSize, compressedSize, compressionRatio } = await compressPDF(file, progressCallback);
                     
-                    processedFiles.push(compressedFile);
+                    file = compressedFile;
                     totalSaved += (originalSize - compressedSize);
                     
-                    detailsDiv.innerHTML += `<div class="text-sm text-green-300">✅ ${file.name}: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)} (-${compressionRatio}%)</div>`;
+                    detailsDiv.innerHTML += `<div class="text-sm text-green-300">✅ Compressé: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)} (-${compressionRatio}%)</div>`;
                 } else {
-                    processedFiles.push(file);
                     detailsDiv.innerHTML += `<div class="text-sm text-gray-300">✓ ${file.name}: ${formatBytes(file.size)} (aucune compression nécessaire)</div>`;
                 }
+                
+                // STEP 2: SPLIT (if pages doubles selected)
+                if (uploadPageFormat === 'double') {
+                    statusSpan.textContent = `📄 Split pages ${i + 1}/${files.length}: ${file.name}...`;
+                    detailsDiv.innerHTML += `<div class="text-sm text-cyan-300">📄 Split en pages doubles...</div>`;
+                    
+                    // Read PDF with pdf.js
+                    const arrayBuffer = await file.arrayBuffer();
+                    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                    const sourcePdf = await loadingTask.promise;
+                    
+                    // Apply split
+                    const { pdfDoc: splitPdfDoc, stats } = await splitPDFPages(sourcePdf, {
+                        pageFormat: uploadPageFormat,
+                        removeFirstLeft: uploadRemoveFirstLeft,
+                        skipFirstPage: false,
+                        quality: 0.85,
+                        progressCallback: (progress, currentPage, total) => {
+                            statusSpan.textContent = `📄 Split ${i + 1}/${files.length}: ${progress}% (page ${currentPage}/${total})`;
+                        }
+                    });
+                    
+                    // Save split PDF
+                    const splitPdfBytes = await splitPdfDoc.save();
+                    const splitFilename = file.name.replace('.pdf', '_split.pdf');
+                    file = new File([splitPdfBytes], splitFilename, { type: 'application/pdf' });
+                    
+                    detailsDiv.innerHTML += `<div class="text-sm text-green-300">✅ Split: ${stats.sourcePages} → ${stats.outputPages} pages</div>`;
+                    
+                    DEBUG.log('SUCCESS', 'BATCH-SPLIT', `File ${i + 1} split completed`, stats);
+                }
+                
+                processedFiles.push(file);
             }
             
             if (totalSaved > 0) {
@@ -1648,10 +1868,10 @@ async function handleUpload(e) {
                 
                 await Promise.all(updatePromises);
                 
-                // Show success summary
+                // Show success summary with AI analysis prompt
                 successDiv.innerHTML = `
                     <div class="bg-green-900 border border-green-700 rounded-lg p-4">
-                        <div class="flex items-start gap-3">
+                        <div class="flex items-start gap-3 mb-3">
                             <i class="fas fa-check-circle text-green-400 text-xl"></i>
                             <div class="flex-1">
                                 <p class="text-white font-semibold mb-2">Upload par lot réussi !</p>
@@ -1659,6 +1879,27 @@ async function handleUpload(e) {
                                     <p>✅ ${data.uploaded} fichiers uploadés</p>
                                     ${data.failed > 0 ? `<p class="text-red-400">❌ ${data.failed} échecs</p>` : ''}
                                 </div>
+                            </div>
+                        </div>
+                        <div class="border-t border-green-700 pt-3">
+                            <p class="text-white text-sm mb-2">
+                                <i class="fas fa-magic text-purple-400 mr-2"></i>
+                                Voulez-vous analyser ces documents avec l'IA maintenant ?
+                            </p>
+                            <div class="flex gap-2">
+                                <button 
+                                    onclick="openBatchAnalyze(); document.getElementById('upload-success').classList.add('hidden');"
+                                    class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition text-sm font-medium"
+                                >
+                                    <i class="fas fa-play mr-2"></i>
+                                    Analyser par lot
+                                </button>
+                                <button 
+                                    onclick="document.getElementById('upload-success').classList.add('hidden');"
+                                    class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition text-sm"
+                                >
+                                    Plus tard
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1683,21 +1924,32 @@ async function handleUpload(e) {
             let file = files[0];
             DEBUG.info('SINGLE-UPLOAD', `File: ${file.name} (${formatBytes(file.size)})`);
             
-            // Compress if needed
-            if (shouldCompressPDF(file)) {
-                progressDiv.innerHTML = `
-                    <div class="bg-blue-900 rounded-lg p-4">
-                        <div class="flex items-center gap-3 mb-2">
-                            <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
-                            <span class="text-white" id="single-upload-status">🗜️ Compression en cours...</span>
-                        </div>
-                        <div class="mt-2 space-y-2 text-sm text-gray-300" id="single-progress-details"></div>
+            // Get upload split options from UI [UPDATED 2025-01-12 03:48]
+            const uploadPageFormat = document.querySelector('input[name="upload-page-format"]:checked')?.value || 'single';
+            const uploadRemoveFirstLeft = document.getElementById('upload-remove-first-left')?.checked || false;
+            
+            DEBUG.log('INFO', 'SINGLE-UPLOAD-OPTIONS', 'Split options', {
+                pageFormat: uploadPageFormat,
+                removeFirstLeft: uploadRemoveFirstLeft
+            });
+            
+            // Setup progress UI
+            progressDiv.innerHTML = `
+                <div class="bg-blue-900 rounded-lg p-4">
+                    <div class="flex items-center gap-3 mb-2">
+                        <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
+                        <span class="text-white" id="single-upload-status">⏳ Traitement en cours...</span>
                     </div>
-                `;
-                
-                const statusSpan = document.getElementById('single-upload-status');
-                const detailsDiv = document.getElementById('single-progress-details');
-                
+                    <div class="mt-2 space-y-2 text-sm text-gray-300" id="single-progress-details"></div>
+                </div>
+            `;
+            
+            const statusSpan = document.getElementById('single-upload-status');
+            const detailsDiv = document.getElementById('single-progress-details');
+            
+            // STEP 1: COMPRESSION (if needed)
+            if (shouldCompressPDF(file)) {
+                statusSpan.textContent = '🗜️ Compression en cours...';
                 detailsDiv.innerHTML = `<div class="text-yellow-300">🗜️ Fichier volumineux détecté (${formatBytes(file.size)})</div>`;
                 
                 const progressCallback = (message, percent) => {
@@ -1711,18 +1963,40 @@ async function handleUpload(e) {
                 
                 detailsDiv.innerHTML += `<div class="text-green-300">✅ Compression terminée: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)} (-${compressionRatio}%)</div>`;
                 detailsDiv.innerHTML += `<div class="text-green-400 font-semibold">💾 Économisé: ${formatBytes(originalSize - compressedSize)}</div>`;
-                
-                statusSpan.textContent = '📤 Upload vers le serveur...';
-            } else {
-                progressDiv.innerHTML = `
-                    <div class="bg-blue-900 rounded-lg p-4">
-                        <div class="flex items-center gap-3">
-                            <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
-                            <span class="text-white">📤 Upload en cours...</span>
-                        </div>
-                    </div>
-                `;
             }
+            
+            // STEP 2: SPLIT (if pages doubles selected)
+            if (uploadPageFormat === 'double') {
+                statusSpan.textContent = '📄 Split en pages doubles...';
+                detailsDiv.innerHTML += `<div class="text-cyan-300">📄 Découpage des pages en cours...</div>`;
+                
+                // Read PDF with pdf.js
+                const arrayBuffer = await file.arrayBuffer();
+                const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                const sourcePdf = await loadingTask.promise;
+                
+                // Apply split
+                const { pdfDoc: splitPdfDoc, stats } = await splitPDFPages(sourcePdf, {
+                    pageFormat: uploadPageFormat,
+                    removeFirstLeft: uploadRemoveFirstLeft,
+                    skipFirstPage: false,
+                    quality: 0.85,
+                    progressCallback: (progress, currentPage, total) => {
+                        statusSpan.textContent = `📄 Split: ${progress}% (page ${currentPage}/${total})`;
+                    }
+                });
+                
+                // Save split PDF
+                const splitPdfBytes = await splitPdfDoc.save();
+                const splitFilename = file.name.replace('.pdf', '_split.pdf');
+                file = new File([splitPdfBytes], splitFilename, { type: 'application/pdf' });
+                
+                detailsDiv.innerHTML += `<div class="text-green-300">✅ Split: ${stats.sourcePages} → ${stats.outputPages} pages</div>`;
+                
+                DEBUG.log('SUCCESS', 'SINGLE-SPLIT', 'File split completed', stats);
+            }
+            
+            statusSpan.textContent = '📤 Upload vers le serveur...';
             
             const formData = new FormData();
             formData.append('file', file);
@@ -2005,6 +2279,13 @@ function renderDocument(doc) {
                         title="Partager (QR Code + Iframe)"
                     >
                         <i class="fas fa-share-alt"></i>
+                    </button>
+                    <button 
+                        onclick="openConvertModal('${doc.token}', '${doc.filename.replace(/'/g, "\\'")}')"
+                        class="bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 rounded transition"
+                        title="Convertir (Split pages, format livret)"
+                    >
+                        <i class="fas fa-cog"></i>
                     </button>
                     <button 
                         onclick="openEditModal('${doc.token}')"
@@ -3996,7 +4277,11 @@ async function loadBatchDocuments() {
         const data = await response.json();
         
         if (data.success && data.documents.length > 0) {
-            listDiv.innerHTML = data.documents.map(doc => `
+            listDiv.innerHTML = data.documents.map(doc => {
+                // Parse tags if string, or use as array if already parsed
+                const tagsArray = typeof doc.tags === 'string' ? (doc.tags ? JSON.parse(doc.tags) : []) : (doc.tags || []);
+                
+                return `
                 <label class="flex items-center gap-3 p-3 bg-gray-800 rounded hover:bg-gray-750 cursor-pointer">
                     <input type="checkbox" class="batch-doc-checkbox w-4 h-4" value="${doc.token}" data-filename="${doc.filename}">
                     <div class="flex-1 min-w-0">
@@ -4004,13 +4289,14 @@ async function loadBatchDocuments() {
                         <p class="text-xs text-gray-400 truncate">${doc.description || 'Pas de description'}</p>
                     </div>
                     <div class="flex flex-wrap gap-1">
-                        ${(doc.tags || []).slice(0, 2).map(tag => `
+                        ${tagsArray.slice(0, 2).map(tag => `
                             <span class="px-2 py-1 bg-blue-600 text-white text-xs rounded">${tag}</span>
                         `).join('')}
-                        ${(doc.tags || []).length > 2 ? `<span class="text-xs text-gray-400">+${(doc.tags || []).length - 2}</span>` : ''}
+                        ${tagsArray.length > 2 ? `<span class="text-xs text-gray-400">+${tagsArray.length - 2}</span>` : ''}
                     </div>
                 </label>
-            `).join('');
+                `;
+            }).join('');
             
             // Add change listeners
             document.querySelectorAll('.batch-doc-checkbox').forEach(cb => {
