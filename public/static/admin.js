@@ -2220,7 +2220,7 @@ function renderDocument(doc) {
                         type="checkbox" 
                         class="doc-checkbox w-5 h-5 cursor-pointer" 
                         data-token="${doc.token}"
-                        onchange="toggleDocumentSelection('${doc.token}')"
+                        onchange="toggleDocumentSelection('${doc.token}', event)"
                     >
                 </div>
                 
@@ -3020,10 +3020,23 @@ async function deleteDocument(token, filename) {
 // BULK ACTIONS - Selection Management
 // ==========================================
 
-function toggleDocumentSelection(token) {
+// Track last clicked document for shift-selection
+let lastClickedToken = null;
+
+function toggleDocumentSelection(token, event) {
     const checkbox = document.querySelector(`.doc-checkbox[data-token="${token}"]`);
     const docCard = document.getElementById(`doc-${token}`);
     
+    // Handle Shift+Click for range selection
+    if (event && event.shiftKey && lastClickedToken && lastClickedToken !== token) {
+        handleShiftSelection(lastClickedToken, token, checkbox.checked);
+        lastClickedToken = token;
+        updateBulkActionsBar();
+        updateSelectAllCheckbox();
+        return;
+    }
+    
+    // Normal single selection
     if (checkbox.checked) {
         if (!selectedDocuments.includes(token)) {
             selectedDocuments.push(token);
@@ -3034,8 +3047,44 @@ function toggleDocumentSelection(token) {
         docCard.classList.remove('border-blue-500', 'bg-gray-600');
     }
     
+    lastClickedToken = token;
     updateBulkActionsBar();
     updateSelectAllCheckbox();
+}
+
+function handleShiftSelection(startToken, endToken, shouldSelect) {
+    // Get all visible document tokens in order
+    const allCheckboxes = Array.from(document.querySelectorAll('.doc-checkbox'));
+    const visibleTokens = allCheckboxes.map(cb => cb.getAttribute('data-token'));
+    
+    // Find start and end indices
+    const startIndex = visibleTokens.indexOf(startToken);
+    const endIndex = visibleTokens.indexOf(endToken);
+    
+    if (startIndex === -1 || endIndex === -1) return;
+    
+    // Determine range (handle both directions)
+    const rangeStart = Math.min(startIndex, endIndex);
+    const rangeEnd = Math.max(startIndex, endIndex);
+    
+    // Select/deselect all documents in range
+    for (let i = rangeStart; i <= rangeEnd; i++) {
+        const token = visibleTokens[i];
+        const checkbox = document.querySelector(`.doc-checkbox[data-token="${token}"]`);
+        const docCard = document.getElementById(`doc-${token}`);
+        
+        if (shouldSelect) {
+            checkbox.checked = true;
+            if (!selectedDocuments.includes(token)) {
+                selectedDocuments.push(token);
+            }
+            docCard.classList.add('border-blue-500', 'bg-gray-600');
+        } else {
+            checkbox.checked = false;
+            selectedDocuments = selectedDocuments.filter(t => t !== token);
+            docCard.classList.remove('border-blue-500', 'bg-gray-600');
+        }
+    }
 }
 
 function toggleSelectAll() {
@@ -3090,6 +3139,7 @@ function updateBulkActionsBar() {
 
 function clearSelection() {
     selectedDocuments = [];
+    lastClickedToken = null;  // Reset shift-selection tracking
     
     const allCheckboxes = document.querySelectorAll('.doc-checkbox');
     allCheckboxes.forEach(checkbox => {
