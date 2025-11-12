@@ -574,117 +574,8 @@ function showAdminPanel() {
             <!-- Main Content -->
             <div class="max-w-7xl mx-auto px-4 py-8">
                 <!-- Library Tab Content -->
-                <div id="library-content">
-                <!-- Upload Section (Accordion - Collapsed by Default) -->
-                <div class="bg-gray-800 rounded-xl shadow-xl mb-8 border border-gray-700">
-                    <!-- Accordion Header (Clickable) -->
-                    <button 
-                        onclick="toggleUploadAccordion()" 
-                        class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-gray-700 transition rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        id="upload-accordion-header"
-                    >
-                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
-                            <i class="fas fa-cloud-upload-alt text-blue-400"></i>
-                            Ajouter un Document
-                        </h2>
-                        <i class="fas fa-chevron-down text-gray-400 transition-transform duration-200" id="upload-accordion-icon"></i>
-                    </button>
-                    
-                    <!-- Accordion Content (Collapsible - Hidden by Default) -->
-                    <div id="upload-accordion-content" class="hidden">
-                        <div class="px-6 pb-6 pt-2">
-                    <form id="upload-form" class="space-y-4">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-300 mb-2">Fichier PDF</label>
-                                <input 
-                                    type="file" 
-                                    id="pdf-file" 
-                                    accept=".pdf"
-                                    class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
-                                    required
-                                />
-                            </div>
-                            
-                            <div>
-                                <label class="block text-sm font-medium text-gray-300 mb-2">Description (optionnelle)</label>
-                                <input 
-                                    type="text" 
-                                    id="pdf-description" 
-                                    class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
-                                    placeholder="Ex: Formation bancassurance module 1"
-                                />
-                            </div>
-                        </div>
-                        
-                        <div id="upload-progress" class="hidden">
-                            <div class="bg-blue-900 rounded-lg p-4">
-                                <div class="flex items-center gap-3">
-                                    <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
-                                    <span class="text-white">Upload en cours...</span>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div id="upload-success" class="hidden bg-green-900 border border-green-700 rounded-lg p-4">
-                            <div class="flex items-start gap-3">
-                                <i class="fas fa-check-circle text-green-400 text-xl"></i>
-                                <div class="flex-1">
-                                    <p class="text-white font-semibold mb-2">Document ajouté avec succès !</p>
-                                    <div class="bg-gray-800 rounded p-3 flex items-center gap-2">
-                                        <input 
-                                            type="text" 
-                                            id="share-url" 
-                                            readonly 
-                                            class="flex-1 bg-transparent text-gray-300 text-sm"
-                                        />
-                                        <button 
-                                            type="button"
-                                            onclick="copyShareUrl()"
-                                            class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
-                                        >
-                                            <i class="fas fa-copy"></i> Copier
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <button 
-                            type="submit" 
-                            class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition flex items-center gap-2"
-                        >
-                            <i class="fas fa-upload"></i>
-                            Télécharger vers R2
-                        </button>
-                    </form>
-                </div>
-                
-                <!-- Documents List -->
-                <div class="bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-700">
-                    <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
-                            <i class="fas fa-list text-blue-400"></i>
-                            Documents Disponibles
-                        </h2>
-                        <button 
-                            onclick="loadDocuments()"
-                            class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition flex items-center gap-2"
-                        >
-                            <i class="fas fa-sync-alt"></i>
-                            Actualiser
-                        </button>
-                    </div>
-                    
-                    <div id="documents-list">
-                        <div class="text-center py-12">
-                            <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white mx-auto"></div>
-                            <p class="text-gray-400 mt-4">Chargement...</p>
-                        </div>
-                    </div>
-                </div>
-                <!-- End library-content -->
-                </div>
+                <!-- Library Tab Content (will be populated by showLibraryContent()) -->
+                <div id="library-content"></div>
                 
                 <!-- Converter Tab Content (hidden by default) -->
                 <div id="converter-content" class="hidden"></div>
@@ -730,12 +621,24 @@ function switchTab(tabName) {
 function showLibraryContent() {
     const content = document.getElementById('library-content');
     content.innerHTML = `
-        <!-- Upload Section -->
-        <div class="bg-gray-800 rounded-xl shadow-xl p-6 mb-8 border border-gray-700">
-            <h2 class="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <i class="fas fa-cloud-upload-alt text-blue-400"></i>
-                Ajouter un Document
-            </h2>
+            <!-- Upload Section (Accordion - Collapsed by Default) -->
+            <div class="bg-gray-800 rounded-xl shadow-xl mb-8 border border-gray-700">
+                <!-- Accordion Header (Clickable) -->
+                <button 
+                    onclick="toggleUploadAccordion()" 
+                    class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-gray-700 transition rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    id="upload-accordion-header"
+                >
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-cloud-upload-alt text-blue-400"></i>
+                        Ajouter un Document
+                    </h2>
+                    <i class="fas fa-chevron-down text-gray-400 transition-transform duration-200" id="upload-accordion-icon"></i>
+                </button>
+                
+                <!-- Accordion Content (Collapsible - Hidden by Default) -->
+                <div id="upload-accordion-content" class="hidden">
+                    <div class="px-6 pb-6 pt-2">
             
             <form id="upload-form" class="space-y-4">
                 <div>
@@ -879,9 +782,10 @@ function showLibraryContent() {
                     Télécharger vers R2
                 </button>
             </form>
-                        </div>
+            
                     </div>
                 </div>
+            </div>
         
         <!-- Documents List -->
         <div class="bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-700">
