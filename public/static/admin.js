@@ -3068,6 +3068,9 @@ function updateBulkActionsBar() {
     const bar = document.getElementById('bulk-actions-bar');
     const countSpan = document.getElementById('selected-count');
     
+    // Check if elements exist (they might be removed after reload)
+    if (!bar || !countSpan) return;
+    
     if (selectedDocuments.length > 0) {
         bar.classList.remove('hidden');
         countSpan.textContent = selectedDocuments.length;
@@ -3347,8 +3350,8 @@ async function submitBulkEdit() {
                 updateData.folder = doc.folder || '';
             }
             
-            const response = await fetch(`/api/admin/documents/${token}`, {
-                method: 'PUT',
+            const response = await fetch(`/api/admin/documents/${token}/description`, {
+                method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json'
                 },
@@ -3513,8 +3516,8 @@ async function submitBulkMove() {
                 folder: folder
             };
             
-            const response = await fetch(`/api/admin/documents/${token}`, {
-                method: 'PUT',
+            const response = await fetch(`/api/admin/documents/${token}/description`, {
+                method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json'
                 },
