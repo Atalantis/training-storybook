@@ -4592,26 +4592,57 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
  * Call AI analysis API
  */
 async function analyzeWithAI(text, imageBase64, isScanned = false, totalPages = null, sampledPages = null) {
+    console.log('🤖 [AI-API] Calling /api/admin/analyze-pdf with:', {
+        textLength: text?.length || 0,
+        hasImage: !!imageBase64,
+        imageSize: imageBase64 ? Math.round(imageBase64.length / 1024) + ' KB' : 'N/A',
+        isScanned,
+        totalPages,
+        sampledPages
+    });
+    
     try {
+        const requestBody = { text, imageBase64, isScanned, totalPages, sampledPages };
+        
         const response = await fetch('/api/admin/analyze-pdf', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, imageBase64, isScanned, totalPages, sampledPages })
+            body: JSON.stringify(requestBody)
         });
         
-        const data = await response.json();
+        console.log('🤖 [AI-API] Response status:', response.status, response.statusText);
         
-        if (!data.success) {
-            alert(`Erreur : ${data.error}`);
-            return null;
+        // Try to parse response even if status is not ok
+        let data;
+        try {
+            data = await response.json();
+            console.log('🤖 [AI-API] Response data:', data);
+        } catch (parseError) {
+            console.error('❌ [AI-API] Failed to parse JSON response:', parseError);
+            throw new Error(`API returned non-JSON response (status ${response.status})`);
         }
         
+        if (!response.ok) {
+            const errorMsg = data.error || `HTTP ${response.status}: ${response.statusText}`;
+            console.error('❌ [AI-API] API returned error:', errorMsg);
+            throw new Error(`API Error: ${errorMsg}`);
+        }
+        
+        if (!data.success) {
+            console.error('❌ [AI-API] Analysis failed:', data.error);
+            throw new Error(`AI Analysis failed: ${data.error}`);
+        }
+        
+        console.log('✅ [AI-API] Analysis successful, suggestions:', data.suggestions);
         return data.suggestions;
         
     } catch (error) {
-        console.error('AI Analysis Error:', error);
-        alert('Erreur lors de l\'analyse IA');
-        return null;
+        console.error('❌ [AI-API] Exception during API call:', {
+            message: error.message,
+            stack: error.stack,
+            error
+        });
+        throw error; // Re-throw to be caught by caller
     }
 }
 
@@ -4792,9 +4823,24 @@ function openConvertModal(token, filename) {
 async function reanalyzeDocument(token) {
     const doc = allDocuments.find(d => d.token === token);
     
-    if (!confirm(`⚠️ Cette analyse consommera des crédits API.\n\nAnalyser "${doc.filename}" ?`)) {
+    console.log('🤖 [REANALYZE] Starting analysis for:', {
+        token,
+        filename: doc?.filename,
+        docFound: !!doc
+    });
+    
+    if (!doc) {
+        alert('❌ Document introuvable');
         return;
     }
+    
+    if (!confirm(`⚠️ Cette analyse consommera des crédits API.\n\nAnalyser "${doc.filename}" ?`)) {
+        console.log('🤖 [REANALYZE] User cancelled analysis');
+        return;
+    }
+    
+    // Open edit modal FIRST so user can see the document being analyzed
+    openEditModal(token);
     
     const button = event.target;
     const originalText = button.innerHTML;
@@ -4803,14 +4849,25 @@ async function reanalyzeDocument(token) {
     // Progress callback
     const updateProgress = (message, percent) => {
         button.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i>${message}`;
+        console.log(`🤖 [REANALYZE] Progress: ${message} (${percent}%)`);
     };
     
     try {
         updateProgress('Téléchargement...', 0);
         
         // Download PDF from server
+        console.log('🤖 [REANALYZE] Fetching document from /api/documents/' + token);
         const pdfResponse = await fetch(`/api/documents/${token}`);
+        
+        if (!pdfResponse.ok) {
+            throw new Error(`Failed to download PDF: ${pdfResponse.status} ${pdfResponse.statusText}`);
+        }
+        
         const pdfBlob = await pdfResponse.blob();
+        console.log('🤖 [REANALYZE] Downloaded PDF:', {
+            size: pdfBlob.size,
+            type: pdfBlob.type
+        });
         
         // Create file from blob
         const file = new File([pdfBlob], doc.filename, { type: 'application/pdf' });
@@ -4818,24 +4875,59 @@ async function reanalyzeDocument(token) {
         updateProgress('Analyse en cours...', 10);
         
         // Extract and analyze
+        console.log('🤖 [REANALYZE] Extracting PDF content...');
         const { text, imageBase64, isScanned, totalPages, sampledPages } = await extractPDFContent(file, updateProgress);
         
+        console.log('🤖 [REANALYZE] Extracted content:', {
+            textLength: text?.length || 0,
+            hasImage: !!imageBase64,
+            isScanned,
+            totalPages,
+            sampledPages
+        });
+        
         if (isScanned && text.length < 50) {
+            console.warn('🤖 [REANALYZE] OCR extracted very little text');
             alert('⚠️ OCR n\'a pas pu extraire assez de texte. L\'IA utilisera uniquement l\'image.');
         }
         
         updateProgress('Envoi à l\'IA...', 95);
+        console.log('🤖 [REANALYZE] Calling AI analysis...');
         const suggestions = await analyzeWithAI(text, imageBase64, isScanned, totalPages, sampledPages);
         
+        console.log('🤖 [REANALYZE] AI response:', suggestions);
+        
         if (suggestions) {
+            console.log('🤖 [REANALYZE] Applying suggestions to edit modal');
             applySuggestions(suggestions, 'edit');
+        } else {
+            alert('⚠️ L\'IA n\'a pas retourné de suggestions');
         }
     } catch (error) {
-        console.error('Analysis error:', error);
-        alert('❌ Erreur lors de l\'analyse du document');
+        console.error('❌ [REANALYZE] Analysis error:', {
+            message: error.message,
+            stack: error.stack,
+            error
+        });
+        
+        // Show detailed error to user
+        let errorMessage = '❌ Erreur lors de l\'analyse du document\n\n';
+        
+        if (error.message.includes('API')) {
+            errorMessage += 'Erreur API : ' + error.message + '\n\n';
+            errorMessage += '💡 Vérifiez que :\n';
+            errorMessage += '- L\'IA est activée dans Sécurité > Configuration IA\n';
+            errorMessage += '- La clé API Gemini est configurée\n';
+            errorMessage += '- Vous avez des crédits API disponibles';
+        } else {
+            errorMessage += 'Détails : ' + error.message;
+        }
+        
+        alert(errorMessage);
     } finally {
         button.disabled = false;
         button.innerHTML = originalText;
+        console.log('🤖 [REANALYZE] Analysis completed (or failed)');
     }
 }
 
