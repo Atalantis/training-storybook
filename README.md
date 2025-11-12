@@ -732,6 +732,15 @@ Ce projet est ouvert aux contributions de la communauté :
 
 ### 🐛 Bugs Résolus Récemment (v1.1.0-beta)
 
+#### Fix #18 : UX Library - Accordéon & Simplification (12/11/2025)
+- **Problème** : Section "Ajouter un Document" trop prominente, bouton "Analyser IA" en doublon
+- **Solutions** :
+  - ✅ Section "Ajouter un Document" transformée en accordéon collapsible (fermé par défaut)
+  - ✅ Suppression du bouton "Analyser avec IA" dans l'upload (déjà dans Batch Analyze)
+  - ✅ Focus sur la bibliothèque existante (fonctionnalité principale)
+  - ✅ Chevron animé pour indiquer l'état ouvert/fermé
+- **Impact** : UI plus claire, moins de clutter, accent sur la consultation des documents
+
 #### Fix #17 : Cloudflare Pages - Headers & Favicon (12/11/2025)
 - **Problème** : _headers file et favicon.svg pas déployés (Cloudflare Pages avec Workers bypass _headers)
 - **Solutions** :
