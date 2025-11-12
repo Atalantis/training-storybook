@@ -3159,7 +3159,7 @@ async function bulkDeleteDocuments() {
         }
     }
     
-    // Clear selection
+    // Clear selection (this will hide the bar via updateBulkActionsBar)
     clearSelection();
     
     // Reload documents
@@ -3170,6 +3170,12 @@ async function bulkDeleteDocuments() {
         alert(`✅ ${successCount} document(s) supprimé(s) avec succès !`);
     } else {
         alert(`⚠️ Résultat:\n\n✅ ${successCount} document(s) supprimé(s)\n❌ ${errorCount} erreur(s)`);
+    }
+    
+    // Ensure bar is hidden (double-check)
+    const bar = document.getElementById('bulk-actions-bar');
+    if (bar) {
+        bar.classList.add('hidden');
     }
 }
 
