@@ -4572,6 +4572,7 @@ async function startBatchAnalyze() {
             DEBUG.groupEnd();
             
             // Change button to "Fermer" instead of auto-closing
+            button.disabled = false; // ✅ Re-enable button
             button.innerHTML = '<i class="fas fa-check mr-2"></i>Fermer';
             button.onclick = closeBatchAnalyze;
         } else {
