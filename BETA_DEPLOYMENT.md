@@ -25,10 +25,11 @@ Cette URL est liée au **commit spécifique** incluant la barre de progression s
 **Projet Cloudflare :** `training-storybook`  
 **Branche GitHub :** `beta`  
 **Derniers Commits :**  
-- `6fe79e4` (feat(beta): 6 correctifs majeurs)
-- `2eb7852` (fix(batch-analyze): InvalidPDFException fix)
-- `a487c53` (feat(batch-analyze): Smart multi-page sampling)
-- `d1f92a2` (feat(batch-analyze): Simulated AI progress bar)
+- `be1087f` (feat(batch-analyze): Show results modal with apply buttons) ✅
+- `d0beefe` (feat(batch-analyze): Simulated AI progress bar) ✅
+- `a487c53` (feat(batch-analyze): Smart multi-page sampling) ✅
+- `2eb7852` (fix(batch-analyze): InvalidPDFException fix) ✅
+- `6fe79e4` (feat(beta): 6 correctifs majeurs) ✅
 
 **Build Time :** 427ms  
 **Upload Time :** 1.50s  
@@ -89,7 +90,21 @@ Cette URL est liée au **commit spécifique** incluant la barre de progression s
 - **Messages :** 6 statuts rotatifs (Analyse IA → Génération tags → Description)
 - **Impact UX :** Réduit perception temps d'attente de ~60%
 - **Précision :** 98.7% (39.5s réel vs 40s estimé pour 4 docs)
+- **Validation User :** ✅ "on voit bien la barre parfait"
 - **Commit :** `d1f92a2`
+
+### 10. 🆕 Modale Résultats avec Boutons "Appliquer"
+- **Fix :** Affichage persistant des résultats au lieu de fermeture automatique
+- **Fichier :** `public/static/admin.js` lignes 4507-4565 + fonction après 4581
+- **Fonctionnalités :**
+  - Cartes détaillées par document (filename, description, top 3 tags)
+  - Boutons individuels "Appliquer" pour chaque résultat
+  - Feedback visuel : bouton vert "✓ Appliqué" après succès
+  - Fermeture manuelle uniquement (bouton "Fermer")
+  - Rechargement automatique liste documents après application
+- **Impact UX :** User peut voir et appliquer sélectivement les suggestions IA
+- **Validation User :** ✅ 4/4 applications réussies en test beta
+- **Commit :** `be1087f`
 
 ---
 
@@ -115,7 +130,7 @@ Cette URL est liée au **commit spécifique** incluant la barre de progression s
    - ✅ Bouton "Plus tard" visible
 4. **F12 Console :** Vérifier **PAS** d'erreur `ReferenceError: successDiv is not defined`
 
-### Test 3 : Admin - Bouton Batch Analyze
+### Test 3 : Admin - Bouton Batch Analyze (Workflow Complet)
 1. Après upload batch
 2. **Cliquer "Analyser par lot"**
 3. **Vérifier :**
@@ -123,20 +138,32 @@ Cette URL est liée au **commit spécifique** incluant la barre de progression s
    - ✅ Modal "Analyse IA par Lot" s'ouvre
    - ✅ Liste des documents visible
 4. **Sélectionner 1-2 documents et lancer l'analyse**
-5. **Vérifier :**
+5. **Vérifier Phase Extraction :**
    - ✅ Status: "📥 Téléchargement {filename}..."
    - ✅ **CRITIQUE:** Pas d'erreur `InvalidPDFException` en console
    - ✅ Status: "🔍 Extraction rapide (1-5 pages)..."
    - ✅ Extraction texte réussie (pas de fichier 3 KB)
    - ✅ Log: "✅ Sufficient text found after X pages" (si texte trouvé)
-   - ✅ **Progression animée 40% → 95%** pendant attente IA (30-40s) 🆕
+6. **Vérifier Phase IA (30-40s) :**
+   - ✅ **Progression animée 40% → 95%** 🆕
    - ✅ **Messages rotatifs** (Analyse IA → Tags → Description) 🆕
    - ✅ Envoi à l'IA réussi
-   - ✅ Affichage tags/suggestions
-6. **Cliquer "Plus tard"**
-7. **Vérifier :**
+7. **Vérifier Modale Résultats (NOUVEAU Fix #10) :**
+   - ✅ **Modale RESTE OUVERTE** (pas de fermeture auto)
+   - ✅ **4 cartes détaillées** par document :
+     - Filename suggéré
+     - Description (100 premiers caractères)
+     - Top 3 tags
+     - Bouton "🪄 Appliquer" bleu
+   - ✅ Header : "✅ Analyse terminée ! X succès, Y échecs"
+8. **Cliquer "Appliquer" sur une carte :**
+   - ✅ Bouton devient vert "✓ Appliqué" (désactivé)
+   - ✅ Console : `✅ [APPLY-SUGGESTIONS] Suggestions applied successfully`
+   - ✅ Liste documents rafraîchie en arrière-plan
+9. **Fermer manuellement avec bouton "Fermer"**
+10. **Vérifier :**
+   - ✅ Métadonnées mises à jour visibles dans liste principale
    - ✅ Pas d'erreur JavaScript
-   - ✅ Message se cache
 
 ### Test 4 : Admin - Header Unicode
 1. Upload fichier avec accents (ex: "Accords Toltèques.pdf")
@@ -181,7 +208,8 @@ Via le dashboard Cloudflare Pages :
 - `CLOSED_BOOK_TIMING_FIX.md` (8.9 KB)
 - `INVALID_PDF_EXCEPTION_FIX.md` (5.0 KB)
 - `SMART_SAMPLING_FIX.md` (7.5 KB)
-- `SIMULATED_PROGRESS_FIX.md` (9.0 KB) 🆕
+- `SIMULATED_PROGRESS_FIX.md` (9.0 KB)
+- `RESULTS_MODAL_FIX.md` (à créer) 🆕
 - `PROJECT_STATUS_SUMMARY.md` (16 KB)
 
 ---
@@ -222,11 +250,14 @@ git push origin --delete beta
 | Aspect | Production (main) | Beta |
 |--------|-------------------|------|
 | URL | training-storybook.pages.dev | beta.training-storybook.pages.dev |
-| Correctifs | Ancienne version | 9 nouveaux correctifs ✅ |
+| Correctifs | Ancienne version | **10 nouveaux correctifs** ✅ |
 | Closed Book | ❌ Couverture blanche | ✅ Couverture page 1 |
 | Timing | ❌ Livre ouvert avant overlay | ✅ Overlay immédiat (131ms) |
 | Animation | ❌ Flip 360° bizarre | ✅ Fade out fluide |
 | Batch Analyze | ❌ ReferenceError + InvalidPDF | ✅ Boutons + Download fonctionnels |
+| Sampling PDFs | ❌ 1 page seulement | ✅ Smart sampling (jusqu'à 5 pages) |
+| Progress IA | ❌ Barre figée 30-40s | ✅ Animation 40%→95% + messages |
+| Results Modal | ❌ Fermeture automatique | ✅ Affichage persistant + boutons Apply |
 | Header Unicode | ⚠️ Warning console | ✅ RFC 5987 encoding |
 
 ---
