@@ -13,8 +13,40 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>()
 
+// Global security headers middleware
+app.use('*', async (c, next) => {
+  await next()
+  
+  // Set security headers
+  c.header('X-Frame-Options', 'SAMEORIGIN')
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+  
+  // Override for /view routes (allow embedding)
+  if (c.req.path.startsWith('/view')) {
+    c.header('X-Frame-Options', 'ALLOWALL')
+    c.header('Content-Security-Policy', 'frame-ancestors *')
+  }
+  
+  // Cache headers for static assets
+  if (c.req.path.startsWith('/static/')) {
+    c.header('Cache-Control', 'public, max-age=31536000, immutable')
+  }
+  
+  // No-cache for API routes
+  if (c.req.path.startsWith('/api/')) {
+    c.header('Cache-Control', 'no-cache, no-store, must-revalidate')
+    c.header('X-Robots-Tag', 'noindex')
+  }
+})
+
 // Enable CORS
 app.use('/api/*', cors())
+
+// Serve favicon
+app.get('/favicon.svg', serveStatic({ path: './public/favicon.svg' }))
+app.get('/favicon.ico', serveStatic({ path: './public/favicon.svg' }))  // Fallback
 
 // Serve static files
 app.use('/static/*', serveStatic({ root: './public' }))
