@@ -4283,9 +4283,16 @@ function closeBatchAnalyze() {
 /**
  * Confirm cancellation of batch analyze (warns about wasted AI credits)
  */
-function confirmCancelBatchAnalyze(appliedCount, remainingCount) {
+function confirmCancelBatchAnalyze(totalAnalyzed) {
     DEBUG.group('⚠️ CANCEL BATCH ANALYZE');
-    DEBUG.info('CANCEL', `Applied: ${appliedCount}, Remaining: ${remainingCount}`);
+    
+    // Recalculate applied count dynamically at click time
+    const appliedButtons = document.querySelectorAll('[id^="batch-result-"] button.bg-green-600');
+    const appliedCount = appliedButtons.length;
+    const remainingCount = totalAnalyzed - appliedCount;
+    
+    DEBUG.info('CANCEL', `Total analyzed: ${totalAnalyzed}, Applied: ${appliedCount}, Remaining: ${remainingCount}`);
+    DEBUG.info('CANCEL', `Found ${appliedButtons.length} green buttons:`, Array.from(appliedButtons).map(btn => btn.parentElement.id));
     
     // Build confirmation message
     let message = '⚠️ Attention : Des crédits IA ont été utilisés pour cette analyse.\n\n';
@@ -4607,17 +4614,14 @@ async function startBatchAnalyze() {
             // Add "Annuler" and "Fermer" buttons
             const buttonContainer = button.parentElement;
             
-            // Count how many suggestions were already applied
-            const appliedCount = document.querySelectorAll('[id^="batch-result-"] button.bg-green-600').length;
-            const remainingCount = result.analyzed - appliedCount;
-            
             // Replace single button with two buttons
+            // Note: appliedCount will be calculated dynamically when "Annuler" is clicked
             buttonContainer.innerHTML = `
                 <div class="flex gap-3 justify-end">
                     <button 
                         id="batch-cancel-btn"
                         class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded transition"
-                        onclick="confirmCancelBatchAnalyze(${appliedCount}, ${remainingCount})"
+                        onclick="confirmCancelBatchAnalyze(${result.analyzed})"
                     >
                         <i class="fas fa-times mr-2"></i>Annuler
                     </button>
@@ -4698,6 +4702,13 @@ async function applyBatchSuggestions(resultId) {
             button.classList.add('bg-green-600', 'cursor-not-allowed');
             button.disabled = true;
             button.innerHTML = '<i class="fas fa-check mr-2"></i>Appliqué';
+            
+            // Debug: Verify button state after modification
+            DEBUG.info('APPLY-SUGGESTIONS', 'Button updated', {
+                buttonId: button.parentElement.id,
+                hasGreenClass: button.classList.contains('bg-green-600'),
+                classList: Array.from(button.classList)
+            });
             
             // Reload documents to show updated metadata
             await loadDocuments();
