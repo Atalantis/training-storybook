@@ -575,13 +575,24 @@ function showAdminPanel() {
             <div class="max-w-7xl mx-auto px-4 py-8">
                 <!-- Library Tab Content -->
                 <div id="library-content">
-                <!-- Upload Section -->
-                <div class="bg-gray-800 rounded-xl shadow-xl p-6 mb-8 border border-gray-700">
-                    <h2 class="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <i class="fas fa-cloud-upload-alt text-blue-400"></i>
-                        Ajouter un Document
-                    </h2>
+                <!-- Upload Section (Accordion - Collapsed by Default) -->
+                <div class="bg-gray-800 rounded-xl shadow-xl mb-8 border border-gray-700">
+                    <!-- Accordion Header (Clickable) -->
+                    <button 
+                        onclick="toggleUploadAccordion()" 
+                        class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-gray-750 transition rounded-xl"
+                        id="upload-accordion-header"
+                    >
+                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                            <i class="fas fa-cloud-upload-alt text-blue-400"></i>
+                            Ajouter un Document
+                        </h2>
+                        <i class="fas fa-chevron-down text-gray-400 transition-transform duration-200" id="upload-accordion-icon"></i>
+                    </button>
                     
+                    <!-- Accordion Content (Collapsible - Hidden by Default) -->
+                    <div id="upload-accordion-content" class="hidden">
+                        <div class="px-6 pb-6 pt-2">
                     <form id="upload-form" class="space-y-4">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
@@ -747,17 +758,6 @@ function showLibraryContent() {
                         <!-- Files will be listed here -->
                     </div>
                     
-                    <!-- AI Analysis Button -->
-                    <button type="button" 
-                            onclick="analyzeUploadFile()" 
-                            id="ai-analyze-btn"
-                            class="mt-2 w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition flex items-center justify-center gap-2">
-                        <i class="fas fa-magic"></i>
-                        ✨ Analyser avec IA
-                    </button>
-                    <p class="text-xs text-gray-500 mt-1">
-                        Génère automatiquement la description, les tags et le dossier. Pour l'upload multiple, cette analyse s'appliquera à tous les fichiers.
-                    </p>
                 </div>
                 
                 <!-- NEW: Page Split Options for Upload -->
@@ -879,7 +879,9 @@ function showLibraryContent() {
                     Télécharger vers R2
                 </button>
             </form>
-        </div>
+                        </div>
+                    </div>
+                </div>
         
         <!-- Documents List -->
         <div class="bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-700">
@@ -4399,6 +4401,28 @@ function toggleUploadSplitOptions() {
             subOptions.classList.remove('hidden');
         } else {
             subOptions.classList.add('hidden');
+        }
+    }
+}
+
+/**
+ * Toggle the "Ajouter un Document" accordion in the library view
+ */
+function toggleUploadAccordion() {
+    const content = document.getElementById('upload-accordion-content');
+    const icon = document.getElementById('upload-accordion-icon');
+    
+    if (content && icon) {
+        const isHidden = content.classList.contains('hidden');
+        
+        if (isHidden) {
+            // Open accordion
+            content.classList.remove('hidden');
+            icon.classList.add('rotate-180');
+        } else {
+            // Close accordion
+            content.classList.add('hidden');
+            icon.classList.remove('rotate-180');
         }
     }
 }
