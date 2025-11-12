@@ -5,7 +5,7 @@
     "dev": "vite",
     "dev:sandbox": "wrangler pages dev dist --ip 0.0.0.0 --port 3000",
     "build:css": "tailwindcss -i ./src/styles.css -o ./public/static/tailwind.css --minify",
-    "build": "npm run build:css && vite build",
+    "build": "node build.js",
     "preview": "wrangler pages dev dist",
     "deploy": "npm run build && wrangler pages deploy dist",
     "deploy:prod": "npm run build && wrangler pages deploy dist --project-name training-storybook",
