@@ -4810,14 +4810,338 @@ async function analyzeConvertedFile() {
  * Re-analyze document in edit modal
  */
 /**
- * Open converter tab with pre-selected document
+ * Open convert modal for a specific document
  */
-function openConvertModal(token, filename) {
-    // Switch to Converter tab
-    switchTab('converter');
+async function openConvertModal(token, filename) {
+    const doc = allDocuments.find(d => d.token === token);
     
-    // Show notification
-    alert(`🔄 Fonctionnalité en développement\n\nPour convertir "${filename}":\n1. Allez dans l'onglet Converter (ci-dessus)\n2. Uploadez le document\n3. Choisissez les options de conversion\n\nOu téléchargez le document et utilisez l'onglet Converter manuellement.`);
+    if (!doc) {
+        alert('❌ Document introuvable');
+        return;
+    }
+    
+    console.log('🔄 [CONVERT-MODAL] Opening conversion modal for:', {
+        token,
+        filename,
+        size: doc.size
+    });
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.id = 'convert-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-3xl w-full border border-gray-700 max-h-[90vh] overflow-y-auto">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-cog text-orange-400"></i>
+                        Convertir : ${filename}
+                    </h2>
+                    <button onclick="closeConvertModal()" class="text-gray-400 hover:text-white text-2xl">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <form id="convert-modal-form" class="space-y-6">
+                    <!-- Page Format Options -->
+                    <div class="bg-gray-700 p-4 rounded-lg border-2 border-purple-500">
+                        <label class="block mb-3">
+                            <span class="text-white font-semibold flex items-center gap-2">
+                                <i class="fas fa-columns text-purple-400"></i>
+                                Format des pages
+                            </span>
+                        </label>
+                        <div class="space-y-3">
+                            <label class="flex items-start gap-3 bg-gray-600 p-3 rounded cursor-pointer hover:bg-gray-550 transition">
+                                <input type="radio" name="modal-page-format" value="single" checked class="mt-1" onchange="toggleModalSplitOptions()" />
+                                <div>
+                                    <p class="text-white font-semibold">📄 Pages simples (défaut)</p>
+                                    <p class="text-gray-400 text-xs">Chaque page PDF = 1 page (format portrait ou paysage standard)</p>
+                                </div>
+                            </label>
+                            
+                            <label class="flex items-start gap-3 bg-gray-600 p-3 rounded cursor-pointer hover:bg-gray-550 transition">
+                                <input type="radio" name="modal-page-format" value="double" class="mt-1" onchange="toggleModalSplitOptions()" />
+                                <div class="flex-1">
+                                    <p class="text-white font-semibold">📖 Pages doubles (à spliter)</p>
+                                    <p class="text-gray-400 text-xs mb-2">Chaque page PDF contient 2 pages côte à côte (livret/magazine)</p>
+                                    
+                                    <div id="modal-split-suboptions" class="hidden mt-2 pl-6 border-l-2 border-purple-400">
+                                        <label class="flex items-start gap-2 cursor-pointer">
+                                            <input type="checkbox" id="modal-remove-first-left" class="mt-1" />
+                                            <div>
+                                                <p class="text-white text-sm">✂️ Supprimer la partie gauche de la 1ère page</p>
+                                                <p class="text-gray-400 text-xs">Utile si la couverture a une page vide à gauche</p>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- Skip First Page Option -->
+                    <label class="flex items-start gap-3 bg-gray-700 p-4 rounded-lg cursor-pointer hover:bg-gray-600 transition">
+                        <input type="checkbox" id="modal-skip-first-page" class="mt-1" />
+                        <div>
+                            <p class="text-white font-semibold">Ignorer la première page</p>
+                            <p class="text-gray-400 text-sm">Utile si la première page est blanche ou une page de garde</p>
+                        </div>
+                    </label>
+                    
+                    <!-- Quality Selector -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">
+                            <i class="fas fa-sliders-h mr-2"></i>
+                            Qualité de compression
+                        </label>
+                        <select 
+                            id="modal-quality-select"
+                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="0.5">Standard (0.5) - Fichier plus léger</option>
+                            <option value="0.7" selected>Moyenne (0.7) - Équilibre recommandé</option>
+                            <option value="0.9">Élevée (0.9) - Meilleure qualité</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Progress Section (hidden by default) -->
+                    <div id="modal-conversion-progress" class="hidden bg-blue-900 border border-blue-700 rounded-lg p-4">
+                        <div class="flex items-center gap-3">
+                            <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+                            <div class="flex-1">
+                                <p class="text-white font-semibold" id="modal-progress-text">Préparation...</p>
+                                <div class="w-full bg-gray-700 rounded-full h-2 mt-2">
+                                    <div id="modal-progress-bar" class="bg-blue-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="flex gap-3">
+                        <button 
+                            type="submit"
+                            class="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 px-6 rounded-lg transition"
+                            id="modal-convert-btn"
+                        >
+                            <i class="fas fa-cog mr-2"></i>
+                            Convertir et Remplacer
+                        </button>
+                        <button 
+                            type="button"
+                            onclick="closeConvertModal()"
+                            class="bg-gray-600 hover:bg-gray-500 text-white px-6 py-3 rounded-lg transition"
+                        >
+                            <i class="fas fa-times mr-2"></i>
+                            Annuler
+                        </button>
+                    </div>
+                    
+                    <!-- Warning -->
+                    <div class="bg-yellow-900 border border-yellow-700 rounded-lg p-4">
+                        <p class="text-yellow-200 text-sm flex items-start gap-2">
+                            <i class="fas fa-exclamation-triangle mt-1"></i>
+                            <span><strong>Attention :</strong> Cette action remplacera le fichier original. Cette opération est irréversible.</span>
+                        </p>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Store token in modal for later use
+    modal.dataset.token = token;
+    modal.dataset.filename = filename;
+    
+    // Setup form submit
+    document.getElementById('convert-modal-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await handleConvertModalSubmit(token, filename);
+    });
+}
+
+function toggleModalSplitOptions() {
+    const pageFormat = document.querySelector('input[name="modal-page-format"]:checked')?.value;
+    const suboptions = document.getElementById('modal-split-suboptions');
+    
+    if (pageFormat === 'double') {
+        suboptions.classList.remove('hidden');
+    } else {
+        suboptions.classList.add('hidden');
+    }
+}
+
+function closeConvertModal() {
+    const modal = document.getElementById('convert-modal');
+    if (modal) modal.remove();
+}
+
+async function handleConvertModalSubmit(token, filename) {
+    console.log('🔄 [CONVERT-SUBMIT] Starting conversion for:', { token, filename });
+    
+    const progressDiv = document.getElementById('modal-conversion-progress');
+    const progressText = document.getElementById('modal-progress-text');
+    const progressBar = document.getElementById('modal-progress-bar');
+    const convertBtn = document.getElementById('modal-convert-btn');
+    
+    // Get options
+    const pageFormat = document.querySelector('input[name="modal-page-format"]:checked')?.value || 'single';
+    const removeFirstLeft = document.getElementById('modal-remove-first-left')?.checked || false;
+    const skipFirstPage = document.getElementById('modal-skip-first-page').checked;
+    const quality = parseFloat(document.getElementById('modal-quality-select').value);
+    
+    console.log('🔄 [CONVERT-SUBMIT] Options:', { pageFormat, removeFirstLeft, skipFirstPage, quality });
+    
+    // Show progress, disable button
+    progressDiv.classList.remove('hidden');
+    convertBtn.disabled = true;
+    convertBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Conversion en cours...';
+    
+    try {
+        // STEP 1: Download PDF from server
+        progressText.textContent = '📥 Téléchargement du document...';
+        progressBar.style.width = '10%';
+        
+        console.log('🔄 [CONVERT-SUBMIT] Fetching document from /api/documents/' + token);
+        const pdfResponse = await fetch(`/api/documents/${token}`);
+        
+        if (!pdfResponse.ok) {
+            throw new Error(`Failed to download PDF: ${pdfResponse.status}`);
+        }
+        
+        const pdfBlob = await pdfResponse.blob();
+        console.log('🔄 [CONVERT-SUBMIT] Downloaded PDF:', {
+            size: pdfBlob.size,
+            type: pdfBlob.type
+        });
+        
+        const file = new File([pdfBlob], filename, { type: 'application/pdf' });
+        const originalFileSize = file.size;
+        
+        progressText.textContent = '🗜️ Préparation du PDF...';
+        progressBar.style.width = '20%';
+        
+        // STEP 2: Compress if needed
+        let processedFile = file;
+        if (shouldCompressPDF(file)) {
+            progressText.textContent = '🗜️ Compression en cours...';
+            console.log('🔄 [CONVERT-SUBMIT] Starting compression');
+            
+            const { compressedFile } = await compressPDF(file, (message, percent) => {
+                progressText.textContent = message;
+                progressBar.style.width = `${20 + (percent * 0.2)}%`; // 20-40%
+            });
+            
+            processedFile = compressedFile;
+            console.log('🔄 [CONVERT-SUBMIT] Compression completed');
+        }
+        
+        // STEP 3: Read PDF with pdf.js
+        progressText.textContent = '📄 Lecture du PDF...';
+        progressBar.style.width = '40%';
+        
+        const arrayBuffer = await processedFile.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const sourcePdf = await loadingTask.promise;
+        
+        console.log('🔄 [CONVERT-SUBMIT] PDF loaded, pages:', sourcePdf.numPages);
+        
+        // STEP 4: Split/convert pages
+        progressText.textContent = '🔄 Conversion en cours...';
+        progressBar.style.width = '50%';
+        
+        const { pdfDoc: newPdfDoc, stats } = await splitPDFPages(sourcePdf, {
+            pageFormat: pageFormat,
+            removeFirstLeft: removeFirstLeft,
+            skipFirstPage: skipFirstPage,
+            quality: quality,
+            progressCallback: (progress, currentPage, total) => {
+                progressText.textContent = `🔄 Conversion... ${progress}% (page ${currentPage}/${total})`;
+                progressBar.style.width = `${50 + (progress * 0.3)}%`; // 50-80%
+            }
+        });
+        
+        console.log('🔄 [CONVERT-SUBMIT] Conversion completed, stats:', stats);
+        
+        // STEP 5: Save PDF
+        progressText.textContent = '💾 Génération du fichier final...';
+        progressBar.style.width = '80%';
+        
+        const pdfBytes = await newPdfDoc.save();
+        const convertedBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+        
+        const fileSizeMB = (pdfBytes.length / 1024 / 1024).toFixed(2);
+        const originalSizeMB = (originalFileSize / 1024 / 1024).toFixed(2);
+        const compressionRatio = ((1 - pdfBytes.length / originalFileSize) * 100).toFixed(1);
+        
+        console.log('🔄 [CONVERT-SUBMIT] PDF generated:', {
+            originalSize: originalSizeMB + ' MB',
+            finalSize: fileSizeMB + ' MB',
+            compression: compressionRatio + '%',
+            outputPages: stats.outputPages
+        });
+        
+        // STEP 6: Upload and replace original file
+        progressText.textContent = '📤 Remplacement du fichier original...';
+        progressBar.style.width = '90%';
+        
+        const formData = new FormData();
+        formData.append('file', convertedBlob, filename);
+        
+        console.log('🔄 [CONVERT-SUBMIT] Uploading to /api/admin/documents/' + token + '/file');
+        const uploadResponse = await fetch(`/api/admin/documents/${token}/file`, {
+            method: 'PUT',
+            body: formData
+        });
+        
+        const uploadData = await uploadResponse.json();
+        
+        if (!uploadResponse.ok || !uploadData.success) {
+            throw new Error(uploadData.error || 'File replacement failed');
+        }
+        
+        console.log('✅ [CONVERT-SUBMIT] File replaced successfully');
+        
+        // STEP 7: Success
+        progressText.textContent = '✅ Conversion terminée !';
+        progressBar.style.width = '100%';
+        
+        // Show success message
+        const pageText = pageFormat === 'single' 
+            ? `${stats.outputPages} pages conservées`
+            : `${stats.outputPages} pages créées`;
+        
+        alert(`✅ Conversion réussie !\n\n` +
+              `📄 ${pageText}\n` +
+              `📊 Taille: ${originalSizeMB} MB → ${fileSizeMB} MB (${compressionRatio}% compression)\n\n` +
+              `Le fichier original a été remplacé.`);
+        
+        // Close modal
+        closeConvertModal();
+        
+        // Reload documents to show updated size
+        await loadDocuments();
+        
+    } catch (error) {
+        console.error('❌ [CONVERT-SUBMIT] Conversion error:', {
+            message: error.message,
+            stack: error.stack,
+            error
+        });
+        
+        progressText.textContent = '❌ Erreur lors de la conversion';
+        progressBar.style.width = '0%';
+        progressBar.classList.add('bg-red-500');
+        
+        alert(`❌ Erreur lors de la conversion\n\n${error.message}`);
+        
+        convertBtn.disabled = false;
+        convertBtn.innerHTML = '<i class="fas fa-cog mr-2"></i> Réessayer';
+    }
 }
 
 async function reanalyzeDocument(token) {

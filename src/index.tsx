@@ -633,6 +633,91 @@ app.delete('/api/admin/documents/:token', async (c) => {
   }
 })
 
+// Replace document file (for conversion)
+app.put('/api/admin/documents/:token/file', async (c) => {
+  try {
+    const token = c.req.param('token')
+    const db = c.env.DB
+    const pdfs = c.env.PDFS
+    
+    if (!db) {
+      return c.json({ error: 'Database not configured' }, 500)
+    }
+    
+    console.log('🔄 [REPLACE-FILE] Starting file replacement for token:', token)
+    
+    // Get existing document metadata
+    const doc = await db.prepare(`
+      SELECT * FROM documents WHERE token = ?
+    `).bind(token).first()
+    
+    if (!doc) {
+      console.error('❌ [REPLACE-FILE] Document not found:', token)
+      return c.json({ success: false, error: 'Document not found' }, 404)
+    }
+    
+    console.log('🔄 [REPLACE-FILE] Found document:', {
+      filename: doc.filename,
+      r2_key: doc.r2_key,
+      size: doc.size
+    })
+    
+    // Parse form data
+    const formData = await c.req.formData()
+    const file = formData.get('file') as File
+    
+    if (!file) {
+      console.error('❌ [REPLACE-FILE] No file provided')
+      return c.json({ success: false, error: 'No file provided' }, 400)
+    }
+    
+    console.log('🔄 [REPLACE-FILE] New file received:', {
+      name: file.name,
+      size: file.size,
+      type: file.type
+    })
+    
+    // Delete old file from R2
+    console.log('🔄 [REPLACE-FILE] Deleting old file from R2:', doc.r2_key)
+    await pdfs.delete(doc.r2_key as string)
+    
+    // Upload new file to R2 with same key
+    console.log('🔄 [REPLACE-FILE] Uploading new file to R2:', doc.r2_key)
+    const arrayBuffer = await file.arrayBuffer()
+    await pdfs.put(doc.r2_key as string, arrayBuffer, {
+      httpMetadata: {
+        contentType: 'application/pdf'
+      }
+    })
+    
+    // Update database with new file size
+    console.log('🔄 [REPLACE-FILE] Updating database with new size:', file.size)
+    await db.prepare(`
+      UPDATE documents 
+      SET size = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE token = ?
+    `).bind(file.size, token).run()
+    
+    console.log('✅ [REPLACE-FILE] File replacement completed successfully')
+    
+    return c.json({ 
+      success: true,
+      message: 'File replaced successfully',
+      newSize: file.size
+    })
+    
+  } catch (error: any) {
+    console.error('❌ [REPLACE-FILE] Error replacing file:', {
+      message: error.message,
+      stack: error.stack
+    })
+    return c.json({ 
+      success: false, 
+      error: `File replacement failed: ${error.message}` 
+    }, 500)
+  }
+})
+
 // Get PDF by token (public access)
 app.get('/api/documents/:token', async (c) => {
   try {
