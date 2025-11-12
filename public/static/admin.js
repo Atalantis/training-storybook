@@ -80,6 +80,154 @@ const DEBUG = {
 // Expose globally for easy access
 window.DEBUG = DEBUG;
 
+// ==========================================
+// PDF COMPRESSION SYSTEM
+// ==========================================
+
+/**
+ * Compress PDF by rendering pages at lower resolution and re-encoding as JPEG
+ * Uses pdf.js to render and pdf-lib to create new PDF
+ * @param {File} file - Original PDF file
+ * @param {Function} progressCallback - Progress callback (optional)
+ * @returns {Promise<{compressedFile: File, originalSize: number, compressedSize: number, compressionRatio: number}>}
+ */
+async function compressPDF(file, progressCallback = null) {
+    const compressStartTime = performance.now();
+    DEBUG.group(`🗜️ COMPRESS PDF: ${file.name}`);
+    DEBUG.info('PDF-COMPRESS', `Original size: ${formatBytes(file.size)}`);
+    
+    try {
+        if (progressCallback) {
+            progressCallback('📖 Chargement du PDF...', 5);
+        }
+        
+        // Load original PDF with pdf.js (for rendering)
+        DEBUG.startTimer('PDF-COMPRESS-load-pdfjsLib');
+        const arrayBuffer = await file.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdfDocument = await loadingTask.promise;
+        DEBUG.endTimer('PDF-COMPRESS-load-pdfjsLib');
+        
+        const pageCount = pdfDocument.numPages;
+        DEBUG.info('PDF-COMPRESS', `Pages: ${pageCount}`);
+        
+        // Create new PDF with pdf-lib
+        DEBUG.startTimer('PDF-COMPRESS-create-new-pdf');
+        const newPdfDoc = await PDFLib.PDFDocument.create();
+        DEBUG.endTimer('PDF-COMPRESS-create-new-pdf');
+        
+        DEBUG.startTimer('PDF-COMPRESS-process-pages');
+        
+        // Process each page
+        for (let pageNum = 1; pageNum <= pageCount; pageNum++) {
+            if (progressCallback) {
+                const progress = 10 + ((pageNum / pageCount) * 85);
+                progressCallback(`🗜️ Page ${pageNum}/${pageCount}...`, progress);
+            }
+            
+            // Render page with pdf.js at reduced scale
+            const page = await pdfDocument.getPage(pageNum);
+            const scale = 1.5; // 150 DPI (down from 300 DPI) - good for web display
+            const viewport = page.getViewport({ scale });
+            
+            DEBUG.debug('PDF-COMPRESS', `Page ${pageNum}: ${Math.round(viewport.width)}x${Math.round(viewport.height)}`);
+            
+            // Create canvas and render
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext('2d');
+            
+            await page.render({
+                canvasContext: ctx,
+                viewport: viewport
+            }).promise;
+            
+            // Convert canvas to JPEG with quality 0.8
+            const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+            const jpegImageBytes = await fetch(jpegDataUrl).then(res => res.arrayBuffer());
+            
+            // Embed image in new PDF
+            const jpegImage = await newPdfDoc.embedJpg(jpegImageBytes);
+            
+            // Calculate PDF page size (convert pixels to points: 72 DPI)
+            const pdfWidth = (viewport.width / scale) * 72 / 96; // Convert to points
+            const pdfHeight = (viewport.height / scale) * 72 / 96;
+            
+            // Add page to new PDF
+            const newPage = newPdfDoc.addPage([pdfWidth, pdfHeight]);
+            newPage.drawImage(jpegImage, {
+                x: 0,
+                y: 0,
+                width: pdfWidth,
+                height: pdfHeight,
+            });
+        }
+        
+        DEBUG.endTimer('PDF-COMPRESS-process-pages');
+        
+        if (progressCallback) {
+            progressCallback('💾 Finalisation...', 95);
+        }
+        
+        // Save compressed PDF
+        DEBUG.startTimer('PDF-COMPRESS-save');
+        const compressedPdfBytes = await newPdfDoc.save();
+        DEBUG.endTimer('PDF-COMPRESS-save');
+        
+        const compressedFile = new File(
+            [compressedPdfBytes], 
+            file.name, 
+            { type: 'application/pdf' }
+        );
+        
+        const originalSize = file.size;
+        const compressedSize = compressedFile.size;
+        const compressionRatio = ((originalSize - compressedSize) / originalSize * 100).toFixed(1);
+        
+        const totalDuration = performance.now() - compressStartTime;
+        DEBUG.perf('PDF-COMPRESS', file.name, Math.round(totalDuration));
+        DEBUG.success('PDF-COMPRESS', `Compressed: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)} (-${compressionRatio}%)`);
+        DEBUG.groupEnd();
+        
+        if (progressCallback) {
+            progressCallback('✅ Compression terminée !', 100);
+        }
+        
+        return {
+            compressedFile,
+            originalSize,
+            compressedSize,
+            compressionRatio: parseFloat(compressionRatio)
+        };
+        
+    } catch (error) {
+        const totalDuration = performance.now() - compressStartTime;
+        DEBUG.error('PDF-COMPRESS', `Compression failed after ${Math.round(totalDuration)}ms`, error);
+        DEBUG.groupEnd();
+        
+        // Return original file if compression fails
+        DEBUG.warn('PDF-COMPRESS', 'Returning original file (compression failed)');
+        return {
+            compressedFile: file,
+            originalSize: file.size,
+            compressedSize: file.size,
+            compressionRatio: 0,
+            error: error.message
+        };
+    }
+}
+
+/**
+ * Check if PDF needs compression (> 10 MB)
+ * @param {File} file - PDF file
+ * @returns {boolean}
+ */
+function shouldCompressPDF(file) {
+    const threshold = 10 * 1024 * 1024; // 10 MB
+    return file.size > threshold;
+}
+
 let isAuthenticated = false;
 
 // Check if already authenticated
@@ -1409,24 +1557,66 @@ async function handleUpload(e) {
     try {
         if (isBatch) {
             DEBUG.info('BATCH-UPLOAD', 'Starting batch upload process');
+            
+            // Check if any files need compression
+            const needsCompression = files.some(f => shouldCompressPDF(f));
+            DEBUG.info('BATCH-UPLOAD', `Files needing compression: ${files.filter(f => shouldCompressPDF(f)).length}/${files.length}`);
+            
             // Batch upload
             progressDiv.innerHTML = `
                 <div class="bg-blue-900 rounded-lg p-4">
                     <div class="flex items-center gap-3 mb-2">
                         <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
-                        <span class="text-white">Upload par lot en cours...</span>
+                        <span class="text-white" id="batch-upload-status">Préparation des fichiers...</span>
                     </div>
                     <div class="mt-2 space-y-2" id="batch-progress-details"></div>
                 </div>
             `;
             
+            const statusSpan = document.getElementById('batch-upload-status');
+            const detailsDiv = document.getElementById('batch-progress-details');
+            
+            // Compress large files first
+            const processedFiles = [];
+            let totalSaved = 0;
+            
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                
+                if (shouldCompressPDF(file)) {
+                    statusSpan.textContent = `🗜️ Compression ${i + 1}/${files.length}: ${file.name}...`;
+                    detailsDiv.innerHTML += `<div class="text-sm text-yellow-300">🗜️ Compression: ${file.name} (${formatBytes(file.size)})</div>`;
+                    
+                    const progressCallback = (message, percent) => {
+                        statusSpan.textContent = `🗜️ [${i + 1}/${files.length}] ${message}`;
+                    };
+                    
+                    const { compressedFile, originalSize, compressedSize, compressionRatio } = await compressPDF(file, progressCallback);
+                    
+                    processedFiles.push(compressedFile);
+                    totalSaved += (originalSize - compressedSize);
+                    
+                    detailsDiv.innerHTML += `<div class="text-sm text-green-300">✅ ${file.name}: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)} (-${compressionRatio}%)</div>`;
+                } else {
+                    processedFiles.push(file);
+                    detailsDiv.innerHTML += `<div class="text-sm text-gray-300">✓ ${file.name}: ${formatBytes(file.size)} (aucune compression nécessaire)</div>`;
+                }
+            }
+            
+            if (totalSaved > 0) {
+                DEBUG.success('BATCH-UPLOAD', `Total compression savings: ${formatBytes(totalSaved)}`);
+                detailsDiv.innerHTML += `<div class="text-sm text-green-400 font-semibold mt-2">💾 Espace économisé: ${formatBytes(totalSaved)}</div>`;
+            }
+            
+            statusSpan.textContent = '📤 Upload vers le serveur...';
+            
             const formData = new FormData();
-            files.forEach(file => {
+            processedFiles.forEach(file => {
                 DEBUG.debug('BATCH-UPLOAD', `Adding file to FormData: ${file.name} (${formatBytes(file.size)})`);
                 formData.append('files', file);
             });
             formData.append('description', descriptionInput.value);
-            DEBUG.info('BATCH-UPLOAD', `FormData prepared with ${files.length} files`);
+            DEBUG.info('BATCH-UPLOAD', `FormData prepared with ${processedFiles.length} files`);
             
             DEBUG.startTimer('BATCH-UPLOAD-API');
             const uploadStartTime = performance.now();
@@ -1489,14 +1679,58 @@ async function handleUpload(e) {
                 alert('Erreur: ' + data.error);
             }
         } else {
-            // Single file upload (original behavior)
-            const file = files[0];
+            // Single file upload
+            let file = files[0];
+            DEBUG.info('SINGLE-UPLOAD', `File: ${file.name} (${formatBytes(file.size)})`);
+            
+            // Compress if needed
+            if (shouldCompressPDF(file)) {
+                progressDiv.innerHTML = `
+                    <div class="bg-blue-900 rounded-lg p-4">
+                        <div class="flex items-center gap-3 mb-2">
+                            <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
+                            <span class="text-white" id="single-upload-status">🗜️ Compression en cours...</span>
+                        </div>
+                        <div class="mt-2 space-y-2 text-sm text-gray-300" id="single-progress-details"></div>
+                    </div>
+                `;
+                
+                const statusSpan = document.getElementById('single-upload-status');
+                const detailsDiv = document.getElementById('single-progress-details');
+                
+                detailsDiv.innerHTML = `<div class="text-yellow-300">🗜️ Fichier volumineux détecté (${formatBytes(file.size)})</div>`;
+                
+                const progressCallback = (message, percent) => {
+                    statusSpan.textContent = message;
+                };
+                
+                const { compressedFile, originalSize, compressedSize, compressionRatio } = await compressPDF(file, progressCallback);
+                
+                file = compressedFile;
+                DEBUG.success('SINGLE-UPLOAD', `Compressed: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)} (-${compressionRatio}%)`);
+                
+                detailsDiv.innerHTML += `<div class="text-green-300">✅ Compression terminée: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)} (-${compressionRatio}%)</div>`;
+                detailsDiv.innerHTML += `<div class="text-green-400 font-semibold">💾 Économisé: ${formatBytes(originalSize - compressedSize)}</div>`;
+                
+                statusSpan.textContent = '📤 Upload vers le serveur...';
+            } else {
+                progressDiv.innerHTML = `
+                    <div class="bg-blue-900 rounded-lg p-4">
+                        <div class="flex items-center gap-3">
+                            <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
+                            <span class="text-white">📤 Upload en cours...</span>
+                        </div>
+                    </div>
+                `;
+            }
+            
             const formData = new FormData();
             formData.append('file', file);
             formData.append('description', descriptionInput.value);
             formData.append('folder', folderInput.value.trim());
             formData.append('tags', JSON.stringify(uploadTags));
             
+            DEBUG.info('SINGLE-UPLOAD', `Uploading file: ${file.name} (${formatBytes(file.size)})`);
             const response = await fetch('/api/admin/upload', {
                 method: 'POST',
                 body: formData
