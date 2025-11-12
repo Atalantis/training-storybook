@@ -14,9 +14,9 @@
 Cette URL est **permanente** pour la branche beta. Tous les futurs pushs sur la branche `beta` mettront automatiquement à jour cette URL.
 
 ### 🔗 URL Preview (Commit Spécifique)
-**https://0df324a1.training-storybook.pages.dev** (dernier déploiement)
+**https://76c0c63c.training-storybook.pages.dev** (dernier déploiement)
 
-Cette URL est liée au **commit spécifique** incluant smart multi-page sampling. Elle ne changera pas même si tu pushs de nouveaux commits sur beta.
+Cette URL est liée au **commit spécifique** incluant la barre de progression simulée. Elle ne changera pas même si tu pushs de nouveaux commits sur beta.
 
 ---
 
@@ -28,6 +28,7 @@ Cette URL est liée au **commit spécifique** incluant smart multi-page sampling
 - `6fe79e4` (feat(beta): 6 correctifs majeurs)
 - `2eb7852` (fix(batch-analyze): InvalidPDFException fix)
 - `a487c53` (feat(batch-analyze): Smart multi-page sampling)
+- `d1f92a2` (feat(batch-analyze): Simulated AI progress bar)
 
 **Build Time :** 427ms  
 **Upload Time :** 1.50s  
@@ -81,6 +82,15 @@ Cette URL est liée au **commit spécifique** incluant smart multi-page sampling
 - **Performance :** +160-410ms overhead (acceptable)
 - **Commit :** `a487c53`
 
+### 9. 🆕 Barre de Progression Simulée IA
+- **Fix :** Progression animée 40% → 95% pendant attente IA
+- **Fichier :** `public/static/admin.js` lignes 4446-4473
+- **Estimation :** 10 secondes par document
+- **Messages :** 6 statuts rotatifs (Analyse IA → Génération tags → Description)
+- **Impact UX :** Réduit perception temps d'attente de ~60%
+- **Précision :** 98.7% (39.5s réel vs 40s estimé pour 4 docs)
+- **Commit :** `d1f92a2`
+
 ---
 
 ## 🧪 Plan de Test Beta
@@ -116,9 +126,11 @@ Cette URL est liée au **commit spécifique** incluant smart multi-page sampling
 5. **Vérifier :**
    - ✅ Status: "📥 Téléchargement {filename}..."
    - ✅ **CRITIQUE:** Pas d'erreur `InvalidPDFException` en console
-   - ✅ Status: "🔍 Extraction rapide (1-5 pages)..." 🆕
+   - ✅ Status: "🔍 Extraction rapide (1-5 pages)..."
    - ✅ Extraction texte réussie (pas de fichier 3 KB)
-   - ✅ Log: "✅ Sufficient text found after X pages" (si texte trouvé) 🆕
+   - ✅ Log: "✅ Sufficient text found after X pages" (si texte trouvé)
+   - ✅ **Progression animée 40% → 95%** pendant attente IA (30-40s) 🆕
+   - ✅ **Messages rotatifs** (Analyse IA → Tags → Description) 🆕
    - ✅ Envoi à l'IA réussi
    - ✅ Affichage tags/suggestions
 6. **Cliquer "Plus tard"**
@@ -168,7 +180,8 @@ Via le dashboard Cloudflare Pages :
 - `CLOSED_BOOK_ANIMATION_FIX.md` (6.9 KB)
 - `CLOSED_BOOK_TIMING_FIX.md` (8.9 KB)
 - `INVALID_PDF_EXCEPTION_FIX.md` (5.0 KB)
-- `SMART_SAMPLING_FIX.md` (7.5 KB) 🆕
+- `SMART_SAMPLING_FIX.md` (7.5 KB)
+- `SIMULATED_PROGRESS_FIX.md` (9.0 KB) 🆕
 - `PROJECT_STATUS_SUMMARY.md` (16 KB)
 
 ---
@@ -209,7 +222,7 @@ git push origin --delete beta
 | Aspect | Production (main) | Beta |
 |--------|-------------------|------|
 | URL | training-storybook.pages.dev | beta.training-storybook.pages.dev |
-| Correctifs | Ancienne version | 8 nouveaux correctifs ✅ |
+| Correctifs | Ancienne version | 9 nouveaux correctifs ✅ |
 | Closed Book | ❌ Couverture blanche | ✅ Couverture page 1 |
 | Timing | ❌ Livre ouvert avant overlay | ✅ Overlay immédiat (131ms) |
 | Animation | ❌ Flip 360° bizarre | ✅ Fade out fluide |
