@@ -732,12 +732,19 @@ Ce projet est ouvert aux contributions de la communauté :
 
 ### 🐛 Bugs Résolus Récemment (v1.1.0-beta)
 
+#### Fix #17 : Cloudflare Pages - Headers & Favicon (12/11/2025)
+- **Problème** : _headers file et favicon.svg pas déployés (Cloudflare Pages avec Workers bypass _headers)
+- **Solutions** :
+  - ✅ Security headers via middleware Hono (Permissions-Policy, X-Frame-Options, X-Content-Type-Options)
+  - ✅ Favicon inline SVG (200 bytes, Cache-Control 1 an)
+  - ✅ Build script custom copie public/ → dist/
+  - ✅ Cache-Control headers pour static assets (1 an) et API (no-cache)
+- **Impact** : Headers sécurisés sur toutes les routes, favicon fonctionnel, console propre en production
+
 #### Fix #16 : Production-Ready - Console & Fiabilité (12/11/2025)
 - **Problème** : Console polluée (Tailwind CDN warning, Permissions-Policy errors, favicon 404, Gemini 503 failures)
 - **Solutions** :
   - ✅ Tailwind CDN → PostCSS build pipeline (23KB minified, pas de warning en prod)
-  - ✅ `_headers` file avec Permissions-Policy propre (geolocation/microphone/camera uniquement)
-  - ✅ Favicon SVG ajouté (icône livre indigo)
   - ✅ Vite prod optimizations (`esbuild.drop: ['console', 'debugger']`)
   - ✅ Retry logic avec exponential backoff pour Gemini 503 (5 retries, 500ms-16s delay + jitter)
 - **Impact** : Console propre, robustesse accrue face aux surcharges Gemini API, build production optimisé
