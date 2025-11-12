@@ -649,7 +649,8 @@ app.get('/', (c) => {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Training Storybook - Solution de visualisation interactive</title>
-        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+        <link href="/static/tailwind.css" rel="stylesheet">
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
         <style>
             * {
@@ -2282,7 +2283,8 @@ app.get('/admin', (c) => {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Administration - Training Storybook</title>
-        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+        <link href="/static/tailwind.css" rel="stylesheet">
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
         <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
@@ -2323,7 +2325,8 @@ app.get('/view', (c) => {
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Document non trouvé</title>
-          <script src="https://cdn.tailwindcss.com"></script>
+          <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+          <link href="/static/tailwind.css" rel="stylesheet">
       </head>
       <body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
           <div class="text-center">
@@ -2584,6 +2587,47 @@ async function getAIConfig(env: Bindings): Promise<{ enabled: boolean; apiKey: s
 /**
  * Analyze PDF with Google Gemini (Flash or Pro)
  */
+/**
+ * Retry utility with exponential backoff and jitter
+ * For 503 errors (overloaded) and network failures
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>, 
+  options: { retries?: number; baseDelay?: number; maxDelay?: number } = {}
+): Promise<T> {
+  const { retries = 5, baseDelay = 500, maxDelay = 16000 } = options;
+  
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const is503 = error.message?.includes('503') || error.message?.includes('overloaded');
+      const isNetworkError = error.message?.includes('fetch') || error.message?.includes('network');
+      const isLastAttempt = attempt === retries - 1;
+      
+      // Only retry on 503 or network errors
+      if (!is503 && !isNetworkError) {
+        throw error;
+      }
+      
+      if (isLastAttempt) {
+        console.error(`❌ Max retries (${retries}) reached for:`, error.message);
+        throw error;
+      }
+      
+      // Exponential backoff with jitter: delay = base * 2^attempt + random(0, 200ms)
+      const exponentialDelay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
+      const jitter = Math.random() * 200;
+      const delay = exponentialDelay + jitter;
+      
+      console.log(`⚠️ Retry ${attempt + 1}/${retries} after ${Math.round(delay)}ms (${error.message})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw new Error('Retry loop exhausted without success');
+}
+
 async function analyzeWithGemini(text: string, imageBase64: string | null, apiKey: string, isScanned: boolean = false, totalPages: number | null = null, sampledPages: number | null = null) {
   const hasText = text && text.trim().length > 0;
   const textContent = hasText 
@@ -2652,34 +2696,37 @@ ${textContent}`
     })
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048  // Increased for Gemini 2.5 Pro thinking tokens
-        }
-      })
+  // Wrap Gemini API call with retry logic (handles 503 overload errors)
+  const data = await withRetry(async () => {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 2048  // Increased for Gemini 2.5 Pro thinking tokens
+          }
+        })
+      }
+    )
+    
+    console.log('📡 Gemini Response:', {
+      status: response.status,
+      ok: response.ok,
+      statusText: response.statusText
+    })
+
+    if (!response.ok) {
+      const errorBody = await response.text()
+      console.error('❌ Gemini Error Body:', errorBody)
+      throw new Error(`Gemini API Error: ${response.status} - ${errorBody}`)
     }
-  )
-  
-  console.log('📡 Gemini Response:', {
-    status: response.status,
-    ok: response.ok,
-    statusText: response.statusText
-  })
 
-  if (!response.ok) {
-    const errorBody = await response.text()
-    console.error('❌ Gemini Error Body:', errorBody)
-    throw new Error(`Gemini API Error: ${response.status} - ${errorBody}`)
-  }
-
-  const data = await response.json()
+    return await response.json()
+  }, { retries: 5, baseDelay: 1000, maxDelay: 16000 })
   
   // Log full response for debugging
   console.log('📦 Gemini Full Response:', JSON.stringify(data, null, 2))
