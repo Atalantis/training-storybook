@@ -4504,18 +4504,57 @@ async function startBatchAnalyze() {
             document.getElementById('batch-progress-text').textContent = `${result.analyzed} / ${result.total}`;
             document.getElementById('batch-progress-bar').style.width = '100%';
             
-            // Show results
-            detailsDiv.innerHTML = '<div class="mt-2 pt-2 border-t border-gray-600"></div>';
-            result.results.forEach(res => {
+            // Show results with apply buttons
+            detailsDiv.innerHTML = `
+                <div class="mt-4 pt-4 border-t border-gray-600">
+                    <p class="text-white font-semibold mb-3">
+                        <i class="fas fa-check-circle text-green-400 mr-2"></i>
+                        Analyse terminée ! ${result.analyzed} succès, ${result.failed} échecs
+                    </p>
+                </div>
+            `;
+            
+            result.results.forEach((res, index) => {
                 DEBUG.debug('BATCH-ANALYZE', `Success: ${res.filename}`, res.suggestions);
-                detailsDiv.innerHTML += `<div class="text-sm text-green-400"><i class="fas fa-check-circle mr-2"></i>Analysé: ${res.filename}</div>`;
-            });
-            result.errors.forEach(err => {
-                DEBUG.error('BATCH-ANALYZE', `Failed: ${err.filename}`, err.error);
-                detailsDiv.innerHTML += `<div class="text-sm text-red-400"><i class="fas fa-times-circle mr-2"></i>Erreur: ${err.filename} - ${err.error}</div>`;
+                
+                const resultId = `batch-result-${index}`;
+                
+                detailsDiv.innerHTML += `
+                    <div class="bg-gray-800 rounded-lg p-4 mb-3" id="${resultId}" data-suggestions='${JSON.stringify(res).replace(/'/g, "&#39;")}'>
+                        <div class="flex items-start justify-between gap-3 mb-2">
+                            <div class="flex-1">
+                                <p class="text-white font-medium">${res.filename}</p>
+                                <p class="text-sm text-gray-400 mt-1">${res.description?.substring(0, 100)}...</p>
+                            </div>
+                            <button 
+                                onclick="applyBatchSuggestions('${resultId}')"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm whitespace-nowrap transition"
+                            >
+                                <i class="fas fa-magic mr-2"></i>Appliquer
+                            </button>
+                        </div>
+                        <div class="flex flex-wrap gap-2 mt-2">
+                            ${res.tags?.slice(0, 3).map(tag => 
+                                `<span class="px-2 py-1 bg-blue-900 text-blue-200 text-xs rounded">${tag}</span>`
+                            ).join('') || ''}
+                        </div>
+                    </div>
+                `;
             });
             
-            // Reload documents
+            result.errors.forEach(err => {
+                DEBUG.error('BATCH-ANALYZE', `Failed: ${err.filename}`, err.error);
+                detailsDiv.innerHTML += `
+                    <div class="bg-red-900/20 border border-red-700 rounded-lg p-3 mb-2">
+                        <p class="text-sm text-red-400">
+                            <i class="fas fa-times-circle mr-2"></i>
+                            <strong>${err.filename}</strong>: ${err.error}
+                        </p>
+                    </div>
+                `;
+            });
+            
+            // Reload documents list
             await loadDocuments();
             
             const totalDuration = performance.now() - batchStartTime;
@@ -4523,10 +4562,9 @@ async function startBatchAnalyze() {
             DEBUG.success('BATCH-ANALYZE', `Batch analysis completed in ${Math.round(totalDuration)}ms`);
             DEBUG.groupEnd();
             
-            setTimeout(() => {
-                alert(`✅ Analyse terminée !\n\n✅ ${result.analyzed} documents analysés\n❌ ${result.failed} échecs`);
-                closeBatchAnalyze();
-            }, 2000);
+            // Change button to "Fermer" instead of auto-closing
+            button.innerHTML = '<i class="fas fa-check mr-2"></i>Fermer';
+            button.onclick = closeBatchAnalyze;
         } else {
             DEBUG.error('BATCH-ANALYZE', 'Batch analysis failed', result.error);
             DEBUG.groupEnd();
@@ -4541,5 +4579,58 @@ async function startBatchAnalyze() {
     } finally {
         button.disabled = false;
         button.innerHTML = '<i class="fas fa-play mr-2"></i>Lancer l\'analyse';
+    }
+}
+
+/**
+ * Apply AI suggestions from batch analyze to a specific document
+ */
+async function applyBatchSuggestions(resultId) {
+    DEBUG.group(`🔧 APPLY SUGGESTIONS: ${resultId}`);
+    
+    try {
+        // Get suggestions from data attribute
+        const resultDiv = document.getElementById(resultId);
+        const suggestions = JSON.parse(resultDiv.dataset.suggestions);
+        
+        DEBUG.info('APPLY-SUGGESTIONS', 'Applying', suggestions);
+        
+        const response = await fetch(`/api/admin/documents/${suggestions.documentId}/description`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: suggestions.filename,
+                description: suggestions.description,
+                tags: suggestions.tags,
+                folder: suggestions.folder
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            DEBUG.success('APPLY-SUGGESTIONS', 'Suggestions applied successfully');
+            
+            // Visual feedback - mark button as applied
+            const button = resultDiv.querySelector('button');
+            button.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+            button.classList.add('bg-green-600', 'cursor-not-allowed');
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-check mr-2"></i>Appliqué';
+            
+            // Reload documents to show updated metadata
+            await loadDocuments();
+            
+            DEBUG.groupEnd();
+        } else {
+            DEBUG.error('APPLY-SUGGESTIONS', 'Failed to apply', result.error);
+            DEBUG.groupEnd();
+            alert('❌ Erreur lors de l\'application des suggestions');
+        }
+    } catch (error) {
+        DEBUG.error('APPLY-SUGGESTIONS', 'Error', error);
+        DEBUG.groupEnd();
+        console.error('Apply suggestions error:', error);
+        alert('❌ Erreur lors de l\'application des suggestions');
     }
 }
