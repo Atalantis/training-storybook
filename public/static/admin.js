@@ -2303,6 +2303,13 @@ function renderDocument(doc) {
                         <i class="fas fa-external-link-alt"></i>
                     </a>
                     <button 
+                        onclick="reanalyzeDocument('${doc.token}')"
+                        class="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-3 py-2 rounded transition"
+                        title="Analyser avec IA (consomme des crédits)"
+                    >
+                        <i class="fas fa-magic"></i>
+                    </button>
+                    <button 
                         onclick="deleteDocument('${doc.token}', '${doc.filename}')"
                         class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded transition"
                         title="Supprimer"
@@ -4771,6 +4778,17 @@ async function analyzeConvertedFile() {
 /**
  * Re-analyze document in edit modal
  */
+/**
+ * Open converter tab with pre-selected document
+ */
+function openConvertModal(token, filename) {
+    // Switch to Converter tab
+    switchTab('converter');
+    
+    // Show notification
+    alert(`🔄 Fonctionnalité en développement\n\nPour convertir "${filename}":\n1. Allez dans l'onglet Converter (ci-dessus)\n2. Uploadez le document\n3. Choisissez les options de conversion\n\nOu téléchargez le document et utilisez l'onglet Converter manuellement.`);
+}
+
 async function reanalyzeDocument(token) {
     const doc = allDocuments.find(d => d.token === token);
     
