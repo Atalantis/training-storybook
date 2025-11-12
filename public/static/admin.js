@@ -4280,6 +4280,39 @@ function closeBatchAnalyze() {
     if (modal) modal.remove();
 }
 
+/**
+ * Confirm cancellation of batch analyze (warns about wasted AI credits)
+ */
+function confirmCancelBatchAnalyze(appliedCount, remainingCount) {
+    DEBUG.group('⚠️ CANCEL BATCH ANALYZE');
+    DEBUG.info('CANCEL', `Applied: ${appliedCount}, Remaining: ${remainingCount}`);
+    
+    // Build confirmation message
+    let message = '⚠️ Attention : Des crédits IA ont été utilisés pour cette analyse.\n\n';
+    
+    if (appliedCount > 0) {
+        message += `✅ ${appliedCount} suggestion(s) déjà appliquée(s) (conservée(s))\n`;
+    }
+    
+    if (remainingCount > 0) {
+        message += `❌ ${remainingCount} suggestion(s) non appliquée(s) (perdues)\n`;
+    }
+    
+    message += '\nVoulez-vous vraiment annuler et fermer la modale ?\n';
+    message += 'Les suggestions non appliquées seront perdues.';
+    
+    const confirmed = confirm(message);
+    
+    if (confirmed) {
+        DEBUG.info('CANCEL', 'User confirmed cancellation');
+        DEBUG.groupEnd();
+        closeBatchAnalyze();
+    } else {
+        DEBUG.info('CANCEL', 'User cancelled the cancellation (stayed in modal)');
+        DEBUG.groupEnd();
+    }
+}
+
 async function loadBatchDocuments() {
     const listDiv = document.getElementById('batch-documents-list');
     listDiv.innerHTML = '<div class="text-center py-4"><div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mx-auto"></div></div>';
@@ -4571,10 +4604,32 @@ async function startBatchAnalyze() {
             DEBUG.success('BATCH-ANALYZE', `Batch analysis completed in ${Math.round(totalDuration)}ms`);
             DEBUG.groupEnd();
             
-            // Change button to "Fermer" instead of auto-closing
-            button.disabled = false; // ✅ Re-enable button
-            button.innerHTML = '<i class="fas fa-check mr-2"></i>Fermer';
-            button.onclick = closeBatchAnalyze;
+            // Add "Annuler" and "Fermer" buttons
+            const buttonContainer = button.parentElement;
+            
+            // Count how many suggestions were already applied
+            const appliedCount = document.querySelectorAll('[id^="batch-result-"] button.bg-green-600').length;
+            const remainingCount = result.analyzed - appliedCount;
+            
+            // Replace single button with two buttons
+            buttonContainer.innerHTML = `
+                <div class="flex gap-3 justify-end">
+                    <button 
+                        id="batch-cancel-btn"
+                        class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded transition"
+                        onclick="confirmCancelBatchAnalyze(${appliedCount}, ${remainingCount})"
+                    >
+                        <i class="fas fa-times mr-2"></i>Annuler
+                    </button>
+                    <button 
+                        id="batch-close-btn"
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded transition"
+                        onclick="closeBatchAnalyze()"
+                    >
+                        <i class="fas fa-check mr-2"></i>Fermer
+                    </button>
+                </div>
+            `;
         } else {
             DEBUG.error('BATCH-ANALYZE', 'Batch analysis failed', result.error);
             DEBUG.groupEnd();
