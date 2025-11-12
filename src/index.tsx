@@ -44,9 +44,16 @@ app.use('*', async (c, next) => {
 // Enable CORS
 app.use('/api/*', cors())
 
-// Serve favicon
-app.get('/favicon.svg', serveStatic({ path: './public/favicon.svg' }))
-app.get('/favicon.ico', serveStatic({ path: './public/favicon.svg' }))  // Fallback
+// Serve favicon (inline SVG - small file)
+const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#4f46e5" d="M19 2H6c-1.206 0-3 .799-3 3v14c0 2.201 1.794 3 3 3h15v-2H6.012C5.55 19.988 5 19.806 5 19s.55-.988 1.012-1H21V4c0-1.103-.897-2-2-2m0 14H5V5c0-.806.55-.988 1-1h13z"/></svg>`
+
+app.get('/favicon.svg', (c) => {
+  return c.body(faviconSVG, 200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000' })
+})
+
+app.get('/favicon.ico', (c) => {
+  return c.body(faviconSVG, 200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000' })
+})
 
 // Serve static files
 app.use('/static/*', serveStatic({ root: './public' }))
