@@ -4569,6 +4569,10 @@ async function startBatchAnalyze() {
             DEBUG.error('BATCH-ANALYZE', 'Batch analysis failed', result.error);
             DEBUG.groupEnd();
             alert('Erreur: ' + result.error);
+            
+            // Reset button on full failure
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-play mr-2"></i>Lancer l\'analyse';
         }
     } catch (error) {
         const totalDuration = performance.now() - batchStartTime;
@@ -4576,7 +4580,8 @@ async function startBatchAnalyze() {
         DEBUG.groupEnd();
         console.error('Batch analyze error:', error);
         alert('❌ Erreur lors de l\'analyse par lot');
-    } finally {
+        
+        // Reset button on exception
         button.disabled = false;
         button.innerHTML = '<i class="fas fa-play mr-2"></i>Lancer l\'analyse';
     }
