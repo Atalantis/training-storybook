@@ -2013,6 +2013,20 @@ async function handleUpload(e) {
 let allDocuments = [];
 let selectedDocuments = []; // For bulk actions
 
+// Helper function to safely parse tags (handles both string and array formats)
+function parseTags(tagsValue) {
+    if (Array.isArray(tagsValue)) {
+        return tagsValue;
+    } else if (typeof tagsValue === 'string') {
+        try {
+            return JSON.parse(tagsValue || '[]');
+        } catch (e) {
+            return [];
+        }
+    }
+    return [];
+}
+
 async function loadDocuments() {
     const listDiv = document.getElementById('documents-list');
     
@@ -2081,12 +2095,8 @@ function populateTagFilter() {
     // Extract unique tags
     const tagsSet = new Set();
     allDocuments.forEach(doc => {
-        try {
-            const tags = JSON.parse(doc.tags || '[]');
-            tags.forEach(tag => tagsSet.add(tag));
-        } catch (e) {
-            // Ignore parse errors
-        }
+        const tags = parseTags(doc.tags);
+        tags.forEach(tag => tagsSet.add(tag));
     });
     
     const tags = [...tagsSet].sort();
@@ -2129,12 +2139,8 @@ function filterDocuments() {
         
         // Tag filter
         if (selectedTag) {
-            try {
-                const tags = JSON.parse(doc.tags || '[]');
-                if (!tags.includes(selectedTag)) {
-                    return false;
-                }
-            } catch (e) {
+            const tags = parseTags(doc.tags);
+            if (!tags.includes(selectedTag)) {
                 return false;
             }
         }
@@ -2166,21 +2172,9 @@ function renderDocument(doc) {
     
     const shareUrl = `${window.location.origin}/view?doc=${doc.token}`;
     
-    // Parse tags
-    let tags = [];
-    try {
-        tags = JSON.parse(doc.tags || '[]');
-    } catch (e) {
-        tags = [];
-    }
-    
-    // Parse client_tags
-    let clientTags = [];
-    try {
-        clientTags = JSON.parse(doc.client_tags || '[]');
-    } catch (e) {
-        clientTags = [];
-    }
+    // Parse tags and client_tags using helper
+    const tags = parseTags(doc.tags);
+    const clientTags = parseTags(doc.client_tags);
     
     // Render tags badges
     const tagsHtml = tags.length > 0 
@@ -2309,12 +2303,7 @@ function openEditModal(token) {
     if (!doc) return;
     
     // Parse current tags
-    let tags = [];
-    try {
-        tags = JSON.parse(doc.tags || '[]');
-    } catch (e) {
-        tags = [];
-    }
+    const tags = parseTags(doc.tags);
     
     // Create modal
     const modal = document.createElement('div');
@@ -3327,12 +3316,7 @@ async function submitBulkEdit() {
             if (!doc) continue;
             
             // Parse current tags
-            let currentTags = [];
-            try {
-                currentTags = JSON.parse(doc.tags || '[]');
-            } catch (e) {
-                currentTags = [];
-            }
+            const currentTags = parseTags(doc.tags);
             
             // Merge with new tags (avoid duplicates)
             const updatedTags = [...new Set([...currentTags, ...bulkEditTags])];
