@@ -732,6 +732,16 @@ Ce projet est ouvert aux contributions de la communauté :
 
 ### 🐛 Bugs Résolus Récemment (v1.1.0-beta)
 
+#### Fix #16 : Production-Ready - Console & Fiabilité (12/11/2025)
+- **Problème** : Console polluée (Tailwind CDN warning, Permissions-Policy errors, favicon 404, Gemini 503 failures)
+- **Solutions** :
+  - ✅ Tailwind CDN → PostCSS build pipeline (23KB minified, pas de warning en prod)
+  - ✅ `_headers` file avec Permissions-Policy propre (geolocation/microphone/camera uniquement)
+  - ✅ Favicon SVG ajouté (icône livre indigo)
+  - ✅ Vite prod optimizations (`esbuild.drop: ['console', 'debugger']`)
+  - ✅ Retry logic avec exponential backoff pour Gemini 503 (5 retries, 500ms-16s delay + jitter)
+- **Impact** : Console propre, robustesse accrue face aux surcharges Gemini API, build production optimisé
+
 #### Fix #15 : Compteur "Annuler" dynamique (12/11/2025)
 - **Problème** : Le compteur de suggestions appliquées/restantes affichait toujours "Applied: 0"
 - **Cause racine** : Le comptage était figé au moment de la création du bouton, avant toute application
