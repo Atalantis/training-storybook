@@ -9,7 +9,7 @@
   "kv_namespaces": [
     {
       "binding": "DOCUMENTS",
-      "id": "<YOUR_KV_NAMESPACE_ID>"  // ⬅️ Replace with your KV namespace ID from: npx wrangler kv:namespace create DOCUMENTS
+      "id": "1af656db33824e62be7ab9ceb9a8f12b"
     }
   ],
   "r2_buckets": [
@@ -22,7 +22,7 @@
     {
       "binding": "DB",
       "database_name": "training-storybook-library",
-      "database_id": "<YOUR_D1_DATABASE_ID>"  // ⬅️ Replace with your D1 database ID from: npx wrangler d1 create training-storybook-library
+      "database_id": "869c11f2-93d0-48f9-b6b3-2a95e143a494"
     }
   ]
 }

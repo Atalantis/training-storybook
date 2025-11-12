@@ -299,6 +299,92 @@ app.post('/api/admin/upload', async (c) => {
   }
 })
 
+// Batch Upload PDF files to R2
+app.post('/api/admin/batch-upload', async (c) => {
+  try {
+    const formData = await c.req.formData()
+    const files = formData.getAll('files') as File[]
+    const description = formData.get('description') as string || ''
+    
+    if (!files || files.length === 0) {
+      return c.json({ success: false, error: 'No files provided' }, 400)
+    }
+
+    console.log(`📦 Batch upload started: ${files.length} files`)
+    
+    const db = c.env.DB
+    if (!db) {
+      return c.json({ error: 'Database not configured' }, 500)
+    }
+    
+    const pdfs = c.env.PDFS
+    const results = []
+    const errors = []
+    
+    // Process files sequentially to avoid memory issues
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      
+      try {
+        // Validate file type
+        if (!file.type.includes('pdf') && !file.name.endsWith('.pdf')) {
+          errors.push({
+            filename: file.name,
+            error: 'Not a PDF file'
+          })
+          continue
+        }
+        
+        // Generate unique token
+        const token = crypto.randomUUID()
+        const r2Key = `pdfs/${token}.pdf`
+        
+        // Upload to R2
+        await pdfs.put(r2Key, file.stream())
+        
+        // Store metadata in D1
+        await db.prepare(`
+          INSERT INTO documents (token, filename, description, r2_key, size, views)
+          VALUES (?, ?, ?, ?, ?, 0)
+        `).bind(token, file.name, description, r2Key, file.size).run()
+        
+        results.push({
+          success: true,
+          filename: file.name,
+          token,
+          shareUrl: `${new URL(c.req.url).origin}/view?doc=${token}`,
+          size: file.size
+        })
+        
+        console.log(`✅ Uploaded ${i + 1}/${files.length}: ${file.name}`)
+        
+      } catch (error: any) {
+        console.error(`❌ Error uploading ${file.name}:`, error)
+        errors.push({
+          filename: file.name,
+          error: error.message || 'Upload failed'
+        })
+      }
+    }
+    
+    return c.json({
+      success: true,
+      total: files.length,
+      uploaded: results.length,
+      failed: errors.length,
+      results,
+      errors
+    })
+    
+  } catch (error: any) {
+    console.error('Batch upload error:', error)
+    return c.json({ 
+      success: false, 
+      error: `Batch upload failed: ${error.message}` 
+    }, 500)
+  }
+})
+
 // Get all documents (admin only) with search, folder, and tags filters
 app.get('/api/admin/documents', async (c) => {
   try {
@@ -2802,6 +2888,117 @@ app.post('/api/admin/analyze-pdf', async (c) => {
     return c.json({ 
       success: false, 
       error: 'Erreur lors de l\'analyse IA'
+    }, 500)
+  }
+})
+
+// Batch AI Analysis for multiple PDFs
+app.post('/api/admin/batch-analyze', async (c) => {
+  try {
+    const { documents } = await c.req.json()
+    
+    if (!Array.isArray(documents) || documents.length === 0) {
+      return c.json({ 
+        success: false, 
+        error: 'No documents provided for analysis' 
+      }, 400)
+    }
+
+    console.log(`🤖 Batch AI analysis started: ${documents.length} documents`)
+    
+    // Get AI configuration
+    const { enabled, apiKey } = await getAIConfig(c.env)
+    
+    if (!enabled) {
+      return c.json({ 
+        success: false, 
+        error: 'L\'analyse IA est désactivée. Activez-la dans Sécurité > Configuration IA.' 
+      }, 400)
+    }
+
+    if (!apiKey) {
+      return c.json({ 
+        success: false, 
+        error: 'Clé API Gemini non configurée.' 
+      }, 400)
+    }
+    
+    const results = []
+    const errors = []
+    
+    // Process documents sequentially (rate limiting + avoid Gemini API throttling)
+    for (let i = 0; i < documents.length; i++) {
+      const doc = documents[i]
+      
+      try {
+        const { text, imageBase64, isScanned, totalPages, sampledPages, filename, documentId } = doc
+        
+        // Validate document data
+        if ((!text || text.trim().length === 0) && !imageBase64) {
+          errors.push({
+            filename: filename || `Document ${i + 1}`,
+            documentId,
+            error: 'Pas de contenu analysable'
+          })
+          continue
+        }
+        
+        console.log(`🔍 Analyzing ${i + 1}/${documents.length}: ${filename}`)
+        
+        // Analyze with Gemini
+        const suggestions = await analyzeWithGemini(
+          text, 
+          imageBase64, 
+          apiKey, 
+          isScanned, 
+          totalPages, 
+          sampledPages
+        )
+        
+        results.push({
+          success: true,
+          filename: filename || `Document ${i + 1}`,
+          documentId,
+          suggestions: {
+            filename: suggestions.filename || filename || 'document.pdf',
+            description: suggestions.description || '',
+            tags: suggestions.tags || [],
+            folder: suggestions.folder || ''
+          }
+        })
+        
+        console.log(`✅ Analyzed ${i + 1}/${documents.length}: ${filename}`)
+        
+        // Small delay between requests to avoid rate limiting (Gemini Flash: 15 RPM)
+        // 4 seconds = ~15 requests per minute
+        if (i < documents.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 4000))
+        }
+        
+      } catch (error: any) {
+        console.error(`❌ Error analyzing document ${i + 1}:`, error)
+        errors.push({
+          filename: doc.filename || `Document ${i + 1}`,
+          documentId: doc.documentId,
+          error: error.message || 'Analysis failed'
+        })
+      }
+    }
+    
+    return c.json({
+      success: true,
+      total: documents.length,
+      analyzed: results.length,
+      failed: errors.length,
+      results,
+      errors
+    })
+    
+  } catch (error: any) {
+    console.error('❌ Batch analysis error:', error)
+    return c.json({ 
+      success: false, 
+      error: `Batch analysis failed: ${error.message}` 
     }, 500)
   }
 })

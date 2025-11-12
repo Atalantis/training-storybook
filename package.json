@@ -10,7 +10,13 @@
     "deploy:prod": "npm run build && wrangler pages deploy dist --project-name training-storybook",
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "clean-port": "fuser -k 3000/tcp 2>/dev/null || true",
-    "test": "curl http://localhost:3000"
+    "test": "curl http://localhost:3000",
+    "git:save": "git add . && git status",
+    "git:commit": "git commit -m",
+    "git:push": "git push origin main",
+    "git:batch": "bash scripts/git-batch.sh",
+    "git:status": "git status",
+    "git:log": "git log --oneline -10"
   },
   "dependencies": {
     "hono": "^4.10.4",

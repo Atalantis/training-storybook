@@ -304,25 +304,70 @@ function showLibraryContent() {
             
             <form id="upload-form" class="space-y-4">
                 <div>
-                    <label class="block text-sm font-medium text-gray-300 mb-2">Fichier PDF</label>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">
+                        Fichier(s) PDF
+                        <span class="text-xs text-gray-500 ml-2">✨ Nouveau : Upload multiple supporté !</span>
+                    </label>
                     <input 
                         type="file" 
                         id="pdf-file" 
                         accept=".pdf"
+                        multiple
                         class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
+                        onchange="handleFileSelection()"
                         required
                     />
+                    
+                    <!-- File Preview List -->
+                    <div id="file-preview-list" class="hidden mt-3 space-y-2 max-h-60 overflow-y-auto">
+                        <!-- Files will be listed here -->
+                    </div>
                     
                     <!-- AI Analysis Button -->
                     <button type="button" 
                             onclick="analyzeUploadFile()" 
+                            id="ai-analyze-btn"
                             class="mt-2 w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition flex items-center justify-center gap-2">
                         <i class="fas fa-magic"></i>
                         ✨ Analyser avec IA
                     </button>
                     <p class="text-xs text-gray-500 mt-1">
-                        Génère automatiquement la description, les tags et le dossier
+                        Génère automatiquement la description, les tags et le dossier. Pour l'upload multiple, cette analyse s'appliquera à tous les fichiers.
                     </p>
+                </div>
+                
+                <!-- NEW: Page Split Options for Upload -->
+                <div class="bg-gray-700 p-4 rounded-lg border-2 border-purple-500">
+                    <label class="block mb-3">
+                        <span class="text-sm font-medium text-white flex items-center gap-2">
+                            <i class="fas fa-columns text-purple-400"></i>
+                            Format des pages PDF
+                        </span>
+                    </label>
+                    <div class="space-y-2">
+                        <label class="flex items-start gap-3 bg-gray-600 p-2 rounded cursor-pointer hover:bg-gray-550 transition">
+                            <input type="radio" name="upload-page-format" value="single" checked class="mt-1" onchange="toggleUploadSplitOptions()" />
+                            <div>
+                                <p class="text-white text-sm font-semibold">📄 Pages simples</p>
+                                <p class="text-gray-400 text-xs">Format standard (1 page = 1 page PDF)</p>
+                            </div>
+                        </label>
+                        
+                        <label class="flex items-start gap-3 bg-gray-600 p-2 rounded cursor-pointer hover:bg-gray-550 transition">
+                            <input type="radio" name="upload-page-format" value="double" class="mt-1" onchange="toggleUploadSplitOptions()" />
+                            <div class="flex-1">
+                                <p class="text-white text-sm font-semibold">📖 Pages doubles</p>
+                                <p class="text-gray-400 text-xs mb-1">2 pages côte à côte (à spliter)</p>
+                                
+                                <div id="upload-split-suboptions" class="hidden mt-1 pl-4 border-l-2 border-purple-400">
+                                    <label class="flex items-start gap-2 cursor-pointer">
+                                        <input type="checkbox" id="upload-remove-first-left" class="mt-0.5" />
+                                        <p class="text-white text-xs">✂️ Supprimer partie gauche 1ère page</p>
+                                    </label>
+                                </div>
+                            </div>
+                        </label>
+                    </div>
                 </div>
                 
                 <div>
@@ -419,13 +464,23 @@ function showLibraryContent() {
                     <i class="fas fa-list text-blue-400"></i>
                     Documents Disponibles
                 </h2>
-                <button 
-                    onclick="loadDocuments()"
-                    class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition flex items-center gap-2"
-                >
-                    <i class="fas fa-sync-alt"></i>
-                    Actualiser
-                </button>
+                <div class="flex gap-2">
+                    <button 
+                        onclick="loadDocuments()"
+                        class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition flex items-center gap-2"
+                    >
+                        <i class="fas fa-sync-alt"></i>
+                        Actualiser
+                    </button>
+                    <button 
+                        onclick="openBatchAnalyze()"
+                        class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition flex items-center gap-2"
+                        title="Analyser plusieurs documents avec l'IA"
+                    >
+                        <i class="fas fa-magic"></i>
+                        Analyser par lot
+                    </button>
+                </div>
             </div>
             
             <!-- Search and Filters -->
@@ -594,6 +649,44 @@ function showConverterContent() {
                     </h3>
                     
                     <div class="space-y-4">
+                        <!-- NEW: Page Split Options -->
+                        <div class="bg-gray-700 p-4 rounded-lg border-2 border-purple-500">
+                            <label class="block mb-3">
+                                <span class="text-white font-semibold flex items-center gap-2">
+                                    <i class="fas fa-columns text-purple-400"></i>
+                                    Format des pages
+                                </span>
+                            </label>
+                            <div class="space-y-3">
+                                <label class="flex items-start gap-3 bg-gray-600 p-3 rounded cursor-pointer hover:bg-gray-550 transition">
+                                    <input type="radio" name="page-format" value="single" checked class="mt-1" onchange="toggleSplitOptions()" />
+                                    <div>
+                                        <p class="text-white font-semibold">📄 Pages simples (défaut)</p>
+                                        <p class="text-gray-400 text-xs">Chaque page PDF = 1 page (format portrait ou paysage standard)</p>
+                                    </div>
+                                </label>
+                                
+                                <label class="flex items-start gap-3 bg-gray-600 p-3 rounded cursor-pointer hover:bg-gray-550 transition">
+                                    <input type="radio" name="page-format" value="double" class="mt-1" onchange="toggleSplitOptions()" />
+                                    <div class="flex-1">
+                                        <p class="text-white font-semibold">📖 Pages doubles (à spliter)</p>
+                                        <p class="text-gray-400 text-xs mb-2">Chaque page PDF contient 2 pages côte à côte (livret/magazine)</p>
+                                        
+                                        <!-- Sub-option: Remove left part of first page -->
+                                        <div id="split-suboptions" class="hidden mt-2 pl-6 border-l-2 border-purple-400">
+                                            <label class="flex items-start gap-2 cursor-pointer">
+                                                <input type="checkbox" id="remove-first-left" class="mt-1" />
+                                                <div>
+                                                    <p class="text-white text-sm">✂️ Supprimer la partie gauche de la 1ère page</p>
+                                                    <p class="text-gray-400 text-xs">Utile si la couverture a une page vide à gauche</p>
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                        
                         <!-- Option 1: Skip first page -->
                         <label class="flex items-start gap-3 bg-gray-700 p-4 rounded-lg cursor-pointer hover:bg-gray-600 transition">
                             <input type="checkbox" id="skip-first-page" class="mt-1" />
@@ -1164,6 +1257,47 @@ function updateUploadTagsDisplay() {
     }
 }
 
+// Handle file selection and display preview
+function handleFileSelection() {
+    const fileInput = document.getElementById('pdf-file');
+    const previewList = document.getElementById('file-preview-list');
+    const files = Array.from(fileInput.files);
+    
+    if (files.length === 0) {
+        previewList.classList.add('hidden');
+        return;
+    }
+    
+    // Show preview list
+    previewList.classList.remove('hidden');
+    previewList.innerHTML = `
+        <div class="bg-gray-700 rounded-lg p-3 border border-gray-600">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-sm font-medium text-white">${files.length} fichier(s) sélectionné(s)</span>
+                <span class="text-xs text-gray-400">${formatBytes(files.reduce((sum, f) => sum + f.size, 0))}</span>
+            </div>
+            <div class="space-y-1 max-h-40 overflow-y-auto">
+                ${files.map((file, i) => `
+                    <div class="flex items-center gap-2 text-sm text-gray-300 bg-gray-800 rounded px-2 py-1">
+                        <i class="fas fa-file-pdf text-red-400"></i>
+                        <span class="flex-1 truncate">${file.name}</span>
+                        <span class="text-xs text-gray-500">${formatBytes(file.size)}</span>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// Format bytes to human readable
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+}
+
 async function handleUpload(e) {
     e.preventDefault();
     
@@ -1173,51 +1307,129 @@ async function handleUpload(e) {
     const progressDiv = document.getElementById('upload-progress');
     const successDiv = document.getElementById('upload-success');
     
-    const file = fileInput.files[0];
-    if (!file) return;
+    const files = Array.from(fileInput.files);
+    if (files.length === 0) return;
+    
+    // Check if batch upload (multiple files)
+    const isBatch = files.length > 1;
     
     progressDiv.classList.remove('hidden');
     successDiv.classList.add('hidden');
     
     try {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('description', descriptionInput.value);
-        formData.append('folder', folderInput.value.trim());
-        formData.append('tags', JSON.stringify(uploadTags));
-        
-        const response = await fetch('/api/admin/upload', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            // Update metadata with folder and tags
-            await fetch(`/api/admin/documents/${data.token}/description`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    folder: folderInput.value.trim(), 
-                    tags: uploadTags 
-                })
+        if (isBatch) {
+            // Batch upload
+            progressDiv.innerHTML = `
+                <div class="bg-blue-900 rounded-lg p-4">
+                    <div class="flex items-center gap-3 mb-2">
+                        <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
+                        <span class="text-white">Upload par lot en cours...</span>
+                    </div>
+                    <div class="mt-2 space-y-2" id="batch-progress-details"></div>
+                </div>
+            `;
+            
+            const formData = new FormData();
+            files.forEach(file => {
+                formData.append('files', file);
+            });
+            formData.append('description', descriptionInput.value);
+            
+            const response = await fetch('/api/admin/batch-upload', {
+                method: 'POST',
+                body: formData
             });
             
-            document.getElementById('share-url').value = data.shareUrl;
-            successDiv.classList.remove('hidden');
+            const data = await response.json();
             
-            // Reset form
-            fileInput.value = '';
-            descriptionInput.value = '';
-            folderInput.value = '';
-            uploadTags = [];
-            updateUploadTagsDisplay();
-            
-            // Reload documents list
-            setTimeout(loadDocuments, 1000);
+            if (data.success) {
+                // Update metadata for all uploaded files
+                const updatePromises = data.results.map(result => 
+                    fetch(`/api/admin/documents/${result.token}/description`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            folder: folderInput.value.trim(), 
+                            tags: uploadTags 
+                        })
+                    })
+                );
+                
+                await Promise.all(updatePromises);
+                
+                // Show success summary
+                successDiv.innerHTML = `
+                    <div class="bg-green-900 border border-green-700 rounded-lg p-4">
+                        <div class="flex items-start gap-3">
+                            <i class="fas fa-check-circle text-green-400 text-xl"></i>
+                            <div class="flex-1">
+                                <p class="text-white font-semibold mb-2">Upload par lot réussi !</p>
+                                <div class="text-sm text-gray-300">
+                                    <p>✅ ${data.uploaded} fichiers uploadés</p>
+                                    ${data.failed > 0 ? `<p class="text-red-400">❌ ${data.failed} échecs</p>` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                successDiv.classList.remove('hidden');
+                
+                // Reset form
+                fileInput.value = '';
+                descriptionInput.value = '';
+                folderInput.value = '';
+                uploadTags = [];
+                updateUploadTagsDisplay();
+                document.getElementById('file-preview-list').classList.add('hidden');
+                
+                // Reload documents list
+                setTimeout(loadDocuments, 1000);
+            } else {
+                alert('Erreur: ' + data.error);
+            }
         } else {
-            alert('Erreur: ' + data.error);
+            // Single file upload (original behavior)
+            const file = files[0];
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('description', descriptionInput.value);
+            formData.append('folder', folderInput.value.trim());
+            formData.append('tags', JSON.stringify(uploadTags));
+            
+            const response = await fetch('/api/admin/upload', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                // Update metadata with folder and tags
+                await fetch(`/api/admin/documents/${data.token}/description`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        folder: folderInput.value.trim(), 
+                        tags: uploadTags 
+                    })
+                });
+                
+                document.getElementById('share-url').value = data.shareUrl;
+                successDiv.classList.remove('hidden');
+                
+                // Reset form
+                fileInput.value = '';
+                descriptionInput.value = '';
+                folderInput.value = '';
+                uploadTags = [];
+                updateUploadTagsDisplay();
+                document.getElementById('file-preview-list').classList.add('hidden');
+                
+                // Reload documents list
+                setTimeout(loadDocuments, 1000);
+            } else {
+                alert('Erreur: ' + data.error);
+            }
         }
     } catch (error) {
         console.error('Upload error:', error);
@@ -2896,7 +3108,7 @@ async function testAIConfig() {
 /**
  * Extract text and thumbnail from PDF file
  */
-async function extractPDFContent(file, progressCallback = null) {
+async function extractPDFContent(file, progressCallback = null, batchMode = false) {
     try {
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
@@ -2906,7 +3118,11 @@ async function extractPDFContent(file, progressCallback = null) {
         // Intelligent sampling strategy based on document size
         let textPagesToExtract, ocrPagesToExtract;
         
-        if (totalPages <= 5) {
+        // BATCH MODE: Ultra-light extraction (1 page only, no OCR)
+        if (batchMode) {
+            textPagesToExtract = 1;  // Only first page
+            ocrPagesToExtract = 0;   // NO OCR in batch mode
+        } else if (totalPages <= 5) {
             textPagesToExtract = totalPages;  // All pages
             ocrPagesToExtract = Math.min(3, totalPages);
         } else if (totalPages <= 20) {
@@ -2955,7 +3171,9 @@ async function extractPDFContent(file, progressCallback = null) {
 
         // Capture first page as image
         const firstPage = await pdf.getPage(1);
-        const viewport = firstPage.getViewport({ scale: 2.0 }); // Higher scale for better OCR
+        // BATCH MODE: Lower resolution for faster processing
+        const scale = batchMode ? 1.0 : 2.0;
+        const viewport = firstPage.getViewport({ scale });
         
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
@@ -2964,14 +3182,16 @@ async function extractPDFContent(file, progressCallback = null) {
         
         await firstPage.render({ canvasContext: context, viewport }).promise;
         
-        // Convert to base64 (reduce quality to limit size)
-        const imageBase64 = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
+        // Convert to base64 (BATCH MODE: lower quality for speed)
+        const quality = batchMode ? 0.5 : 0.7;
+        const imageBase64 = canvas.toDataURL('image/jpeg', quality).split(',')[1];
         
         // Check if text is empty or too short (likely scanned PDF)
         const textLength = fullText.trim().length;
         const isScanned = textLength < 100; // Less than 100 chars = probably scanned
         
-        if (isScanned) {
+        // SKIP OCR in batch mode (too slow)
+        if (isScanned && !batchMode && ocrPagesToExtract > 0) {
             if (progressCallback) {
                 progressCallback('⚠️ PDF scanné détecté, lancement OCR...', 50);
             }
@@ -3291,5 +3511,278 @@ async function reanalyzeDocument(token) {
     } finally {
         button.disabled = false;
         button.innerHTML = originalText;
+    }
+}
+
+// ==========================================
+// BATCH ANALYZE FUNCTIONS
+// ==========================================
+
+function openBatchAnalyze() {
+    const modal = document.createElement('div');
+    modal.id = 'batch-analyze-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-gray-700">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-magic text-purple-400"></i>
+                        Analyse IA par Lot
+                    </h2>
+                    <button onclick="closeBatchAnalyze()" class="text-gray-400 hover:text-white text-2xl">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <div class="mb-6 space-y-4">
+                    <div class="bg-blue-900 border border-blue-700 rounded-lg p-4">
+                        <p class="text-white text-sm">
+                            <i class="fas fa-info-circle mr-2"></i>
+                            Sélectionnez les documents à analyser avec l'IA. L'analyse mettra à jour automatiquement
+                            les descriptions, tags et dossiers suggérés.
+                        </p>
+                        <p class="text-gray-300 text-xs mt-2">
+                            ⚠️ Limite : 15 requêtes/minute (Gemini Flash). Un délai de 4 secondes est appliqué entre chaque analyse.
+                        </p>
+                        <p class="text-yellow-300 text-xs mt-2">
+                            ⚡ Mode batch optimisé : Extraction rapide (1ère page uniquement, pas d'OCR). Recommandé : 5 documents max par lot.
+                        </p>
+                    </div>
+                    
+                    <div class="bg-gray-700 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <label class="flex items-center gap-2 text-white cursor-pointer">
+                                <input type="checkbox" id="select-all-batch" onchange="toggleSelectAllBatch()" class="w-4 h-4">
+                                <span class="font-medium">Tout sélectionner</span>
+                            </label>
+                            <span id="batch-count" class="text-sm text-gray-300">0 sélectionné(s)</span>
+                        </div>
+                        <div id="batch-documents-list" class="space-y-2 max-h-96 overflow-y-auto">
+                            <!-- Documents will be listed here -->
+                        </div>
+                    </div>
+                    
+                    <div id="batch-progress" class="hidden bg-gray-700 rounded-lg p-4">
+                        <div class="space-y-2">
+                            <div class="flex justify-between text-sm text-white">
+                                <span id="batch-status">En cours...</span>
+                                <span id="batch-progress-text">0 / 0</span>
+                            </div>
+                            <div class="w-full bg-gray-600 rounded-full h-2">
+                                <div id="batch-progress-bar" class="bg-purple-600 h-2 rounded-full transition-all" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div id="batch-details" class="mt-3 space-y-1 max-h-60 overflow-y-auto"></div>
+                    </div>
+                    
+                    <div class="flex gap-3">
+                        <button 
+                            onclick="startBatchAnalyze()"
+                            id="batch-analyze-btn"
+                            class="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg transition font-medium"
+                        >
+                            <i class="fas fa-play mr-2"></i>
+                            Lancer l'analyse
+                        </button>
+                        <button 
+                            onclick="closeBatchAnalyze()"
+                            class="bg-gray-600 hover:bg-gray-500 text-white px-6 py-3 rounded-lg transition"
+                        >
+                            Annuler
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    loadBatchDocuments();
+}
+
+function closeBatchAnalyze() {
+    const modal = document.getElementById('batch-analyze-modal');
+    if (modal) modal.remove();
+}
+
+async function loadBatchDocuments() {
+    const listDiv = document.getElementById('batch-documents-list');
+    listDiv.innerHTML = '<div class="text-center py-4"><div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mx-auto"></div></div>';
+    
+    try {
+        const response = await fetch('/api/admin/documents');
+        const data = await response.json();
+        
+        if (data.success && data.documents.length > 0) {
+            listDiv.innerHTML = data.documents.map(doc => `
+                <label class="flex items-center gap-3 p-3 bg-gray-800 rounded hover:bg-gray-750 cursor-pointer">
+                    <input type="checkbox" class="batch-doc-checkbox w-4 h-4" value="${doc.token}" data-filename="${doc.filename}">
+                    <div class="flex-1 min-w-0">
+                        <p class="text-white font-medium truncate">${doc.filename}</p>
+                        <p class="text-xs text-gray-400 truncate">${doc.description || 'Pas de description'}</p>
+                    </div>
+                    <div class="flex flex-wrap gap-1">
+                        ${(doc.tags || []).slice(0, 2).map(tag => `
+                            <span class="px-2 py-1 bg-blue-600 text-white text-xs rounded">${tag}</span>
+                        `).join('')}
+                        ${(doc.tags || []).length > 2 ? `<span class="text-xs text-gray-400">+${(doc.tags || []).length - 2}</span>` : ''}
+                    </div>
+                </label>
+            `).join('');
+            
+            // Add change listeners
+            document.querySelectorAll('.batch-doc-checkbox').forEach(cb => {
+                cb.addEventListener('change', updateBatchCount);
+            });
+        } else {
+            listDiv.innerHTML = '<p class="text-center text-gray-400 py-4">Aucun document disponible</p>';
+        }
+    } catch (error) {
+        console.error('Error loading documents:', error);
+        listDiv.innerHTML = '<p class="text-center text-red-400 py-4">Erreur lors du chargement</p>';
+    }
+}
+
+function toggleSelectAllBatch() {
+    const selectAll = document.getElementById('select-all-batch');
+    const checkboxes = document.querySelectorAll('.batch-doc-checkbox');
+    checkboxes.forEach(cb => cb.checked = selectAll.checked);
+    updateBatchCount();
+}
+
+function updateBatchCount() {
+    const checkboxes = document.querySelectorAll('.batch-doc-checkbox:checked');
+    document.getElementById('batch-count').textContent = `${checkboxes.length} sélectionné(s)`;
+}
+
+// ==========================================
+// PAGE SPLIT OPTIONS TOGGLE FUNCTIONS
+// ==========================================
+
+function toggleSplitOptions() {
+    const isDouble = document.querySelector('input[name="page-format"]:checked')?.value === 'double';
+    const subOptions = document.getElementById('split-suboptions');
+    if (subOptions) {
+        if (isDouble) {
+            subOptions.classList.remove('hidden');
+        } else {
+            subOptions.classList.add('hidden');
+        }
+    }
+}
+
+function toggleUploadSplitOptions() {
+    const isDouble = document.querySelector('input[name="upload-page-format"]:checked')?.value === 'double';
+    const subOptions = document.getElementById('upload-split-suboptions');
+    if (subOptions) {
+        if (isDouble) {
+            subOptions.classList.remove('hidden');
+        } else {
+            subOptions.classList.add('hidden');
+        }
+    }
+}
+
+async function startBatchAnalyze() {
+    const checkboxes = Array.from(document.querySelectorAll('.batch-doc-checkbox:checked'));
+    
+    if (checkboxes.length === 0) {
+        alert('Veuillez sélectionner au moins un document');
+        return;
+    }
+    
+    const button = document.getElementById('batch-analyze-btn');
+    button.disabled = true;
+    button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Analyse en cours...';
+    
+    const progressDiv = document.getElementById('batch-progress');
+    const detailsDiv = document.getElementById('batch-details');
+    progressDiv.classList.remove('hidden');
+    detailsDiv.innerHTML = '';
+    
+    try {
+        // Prepare documents for batch analysis
+        const documentsToAnalyze = [];
+        
+        for (let i = 0; i < checkboxes.length; i++) {
+            const cb = checkboxes[i];
+            const token = cb.value;
+            const filename = cb.dataset.filename;
+            
+            document.getElementById('batch-status').textContent = `Extraction du contenu ${i + 1}/${checkboxes.length}...`;
+            document.getElementById('batch-progress-text').textContent = `${i} / ${checkboxes.length}`;
+            document.getElementById('batch-progress-bar').style.width = `${(i / checkboxes.length) * 100}%`;
+            
+            // Fetch PDF from R2
+            document.getElementById('batch-status').textContent = `📥 Téléchargement ${filename}...`;
+            const pdfResponse = await fetch(`/view?doc=${token}&download=1`);
+            const pdfBlob = await pdfResponse.blob();
+            const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
+            
+            // Extract content with progress callback
+            const progressCallback = (message, percent) => {
+                document.getElementById('batch-status').textContent = `[${i + 1}/${checkboxes.length}] ${message}`;
+                console.log(`[Batch ${i + 1}/${checkboxes.length}] ${message} - ${percent}%`);
+            };
+            
+            document.getElementById('batch-status').textContent = `[${i + 1}/${checkboxes.length}] 🔍 Extraction rapide (1 page)...`;
+            const { text, imageBase64, isScanned, totalPages, sampledPages } = await extractPDFContent(pdfFile, progressCallback, true); // true = batch mode (fast)
+            
+            documentsToAnalyze.push({
+                documentId: token,
+                filename,
+                text,
+                imageBase64,
+                isScanned,
+                totalPages,
+                sampledPages
+            });
+            
+            detailsDiv.innerHTML += `<div class="text-sm text-gray-300"><i class="fas fa-check text-green-400 mr-2"></i>Extrait: ${filename}</div>`;
+        }
+        
+        // Send to batch analyze endpoint
+        document.getElementById('batch-status').textContent = 'Envoi à l\'IA...';
+        
+        const response = await fetch('/api/admin/batch-analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ documents: documentsToAnalyze })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Update progress
+            document.getElementById('batch-status').textContent = 'Terminé !';
+            document.getElementById('batch-progress-text').textContent = `${result.analyzed} / ${result.total}`;
+            document.getElementById('batch-progress-bar').style.width = '100%';
+            
+            // Show results
+            detailsDiv.innerHTML = '<div class="mt-2 pt-2 border-t border-gray-600"></div>';
+            result.results.forEach(res => {
+                detailsDiv.innerHTML += `<div class="text-sm text-green-400"><i class="fas fa-check-circle mr-2"></i>Analysé: ${res.filename}</div>`;
+            });
+            result.errors.forEach(err => {
+                detailsDiv.innerHTML += `<div class="text-sm text-red-400"><i class="fas fa-times-circle mr-2"></i>Erreur: ${err.filename} - ${err.error}</div>`;
+            });
+            
+            // Reload documents
+            await loadDocuments();
+            
+            setTimeout(() => {
+                alert(`✅ Analyse terminée !\n\n✅ ${result.analyzed} documents analysés\n❌ ${result.failed} échecs`);
+                closeBatchAnalyze();
+            }, 2000);
+        } else {
+            alert('Erreur: ' + result.error);
+        }
+    } catch (error) {
+        console.error('Batch analyze error:', error);
+        alert('❌ Erreur lors de l\'analyse par lot');
+    } finally {
+        button.disabled = false;
+        button.innerHTML = '<i class="fas fa-play mr-2"></i>Lancer l\'analyse';
     }
 }
