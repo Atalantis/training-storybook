@@ -3172,8 +3172,7 @@ async function bulkDeleteDocuments() {
         alert(`⚠️ Résultat:\n\n✅ ${successCount} document(s) supprimé(s)\n❌ ${errorCount} erreur(s)`);
     }
     
-    // Ensure bar is hidden (double-check)
-    const bar = document.getElementById('bulk-actions-bar');
+    // Ensure bar is hidden (double-check) - reuse bar variable
     if (bar) {
         bar.classList.add('hidden');
     }
