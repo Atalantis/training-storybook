@@ -723,12 +723,67 @@ Ce projet est ouvert aux contributions de la communauté :
 
 ## 📊 Statistiques du Projet
 
-- **Version** : 1.1.0
+- **Version** : 1.1.0-beta
 - **Date** : Novembre 2025
-- **Status** : ✅ Production Ready
-- **Lignes de code** : ~3500
+- **Status** : 🧪 Beta Testing (v1.1.0 en cours de validation)
+- **Lignes de code** : ~4700
 - **Technologies** : 12
 - **Services Cloudflare** : 4 (Pages, Workers, R2, D1)
+
+### 🐛 Bugs Résolus Récemment (v1.1.0-beta)
+
+#### Fix #18 : UX Library - Accordéon & Simplification (12/11/2025)
+- **Problème** : Section "Ajouter un Document" trop prominente, bouton "Analyser IA" en doublon
+- **Solutions** :
+  - ✅ Section "Ajouter un Document" transformée en accordéon collapsible (fermé par défaut)
+  - ✅ Suppression du bouton "Analyser avec IA" dans l'upload (déjà dans Batch Analyze)
+  - ✅ Focus sur la bibliothèque existante (fonctionnalité principale)
+  - ✅ Chevron animé pour indiquer l'état ouvert/fermé
+- **Impact** : UI plus claire, moins de clutter, accent sur la consultation des documents
+
+#### Fix #17 : Cloudflare Pages - Headers & Favicon (12/11/2025)
+- **Problème** : _headers file et favicon.svg pas déployés (Cloudflare Pages avec Workers bypass _headers)
+- **Solutions** :
+  - ✅ Security headers via middleware Hono (Permissions-Policy, X-Frame-Options, X-Content-Type-Options)
+  - ✅ Favicon inline SVG (200 bytes, Cache-Control 1 an)
+  - ✅ Build script custom copie public/ → dist/
+  - ✅ Cache-Control headers pour static assets (1 an) et API (no-cache)
+- **Impact** : Headers sécurisés sur toutes les routes, favicon fonctionnel, console propre en production
+
+#### Fix #16 : Production-Ready - Console & Fiabilité (12/11/2025)
+- **Problème** : Console polluée (Tailwind CDN warning, Permissions-Policy errors, favicon 404, Gemini 503 failures)
+- **Solutions** :
+  - ✅ Tailwind CDN → PostCSS build pipeline (23KB minified, pas de warning en prod)
+  - ✅ Vite prod optimizations (`esbuild.drop: ['console', 'debugger']`)
+  - ✅ Retry logic avec exponential backoff pour Gemini 503 (5 retries, 500ms-16s delay + jitter)
+- **Impact** : Console propre, robustesse accrue face aux surcharges Gemini API, build production optimisé
+
+#### Fix #15 : Compteur "Annuler" dynamique (12/11/2025)
+- **Problème** : Le compteur de suggestions appliquées/restantes affichait toujours "Applied: 0"
+- **Cause racine** : Le comptage était figé au moment de la création du bouton, avant toute application
+- **Solution** : Recalcul dynamique du compteur au moment du clic sur "Annuler"
+- **Impact** : Modale de confirmation affiche maintenant les bons comptes en temps réel
+
+#### Fix #14 : Bouton "Fermer" désactivé (11/11/2025)
+- **Problème** : Le bouton "Fermer" restait désactivé après analyse, forçant l'usage du 'X'
+- **Solution** : Ajout de `button.disabled = false` avant de transformer le bouton en "Fermer"
+
+#### Fix #13 : Reset du bouton dans `finally` (11/11/2025)
+- **Problème** : Le bouton "Fermer" se réinitialisant incorrectement en "Lancer l'analyse"
+- **Solution** : Suppression du bloc `finally` qui écrasait l'état du bouton
+
+#### Fix #12 : Métadonnées non appliquées (11/11/2025)
+- **Problème** : Le PATCH backend recevait `undefined` pour description, tags et folder
+- **Cause racine** : Mauvaise extraction des suggestions imbriquées (`suggestions.suggestions.*`)
+- **Solution** : Correction de l'extraction dans `applyBatchSuggestions` pour utiliser la structure imbriquée
+
+#### Fix #11 : Extraction de texte PDF scannés (10/11/2025)
+- **Problème** : "Insufficient text" pour PDFs scannés (première page vide)
+- **Solution** : Smart sampling jusqu'à 5 pages avec seuil de 300 caractères et arrêt anticipé
+
+#### Fix #10 : Modale de résultats persistante (10/11/2025)
+- **Problème** : Modale se fermait automatiquement avant lecture/application des suggestions
+- **Solution** : Remplacement de l'auto-close par modale persistante avec cartes détaillées et boutons "Appliquer"
 
 ---
 

@@ -4,7 +4,8 @@
   "scripts": {
     "dev": "vite",
     "dev:sandbox": "wrangler pages dev dist --ip 0.0.0.0 --port 3000",
-    "build": "vite build",
+    "build:css": "tailwindcss -i ./src/styles.css -o ./public/static/tailwind.css --minify",
+    "build": "node build.js",
     "preview": "wrangler pages dev dist",
     "deploy": "npm run build && wrangler pages deploy dist",
     "deploy:prod": "npm run build && wrangler pages deploy dist --project-name training-storybook",
@@ -25,6 +26,9 @@
   "devDependencies": {
     "@hono/vite-build": "^1.2.0",
     "@hono/vite-dev-server": "^0.18.2",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
     "vite": "^6.3.5",
     "wrangler": "^4.4.0"
   }

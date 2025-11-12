@@ -331,7 +331,19 @@ async function initializePageFlip() {
     
     // Render pages
     loadingText.textContent = 'Préparation des pages...';
-    const renderScale = 1.5;
+    
+    // IMPORTANT: Calculate render scale to match PageFlip dimensions exactly
+    // This prevents offset/centering issues with object-fit: contain
+    const firstPageViewport = await pdfDoc.getPage(1).then(p => p.getViewport({ scale: 1.0 }));
+    const renderScale = basePageWidth / firstPageViewport.width;
+    
+    console.log('Render dimensions:', {
+        basePageWidth,
+        basePageHeight,
+        pdfWidth: firstPageViewport.width,
+        pdfHeight: firstPageViewport.height,
+        calculatedScale: renderScale
+    });
     
     // Create container for all pages
     const pagesContainer = document.createElement('div');
@@ -341,11 +353,14 @@ async function initializePageFlip() {
     
     for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
         const page = await pdfDoc.getPage(pageNum);
+        
+        // Use calculated scale to match PageFlip width exactly
         const viewport = page.getViewport({ scale: renderScale });
         
         const canvas = document.createElement('canvas');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        // Round to avoid sub-pixel rendering issues
+        canvas.width = Math.round(viewport.width);
+        canvas.height = Math.round(viewport.height);
         const context = canvas.getContext('2d');
         
         context.fillStyle = 'white';
@@ -382,13 +397,17 @@ async function initializePageFlip() {
         console.log('Page flip state:', e.data);
     });
     
-    // Show viewer
+    // CRITICAL: Show closed book effect FIRST (before viewer becomes visible)
+    // This ensures users see the 3D book animation before the open book
+    await showClosedBookEffect();
+    
+    // Show viewer (will be hidden under overlay initially)
     loadingDiv.style.display = 'none';
     viewerContainer.classList.add('active');
     updatePageInfo();
     
-    // Generate thumbnails
-    await generateThumbnails();
+    // Generate thumbnails in background (non-blocking)
+    generateThumbnails(); // Remove await - don't block on thumbnails
 }
 
 // Load PDF from API
@@ -493,6 +512,206 @@ document.addEventListener('keydown', (e) => {
             break;
     }
 });
+
+// Closed book effect with thickness
+async function showClosedBookEffect() {
+    if (!pdfDoc || !flipbookContainer) return;
+    
+    console.time('⏱️ Closed book cover render');
+    
+    // Render first page (cover) for preview at lower scale for speed
+    const firstPage = await pdfDoc.getPage(1);
+    const viewport = firstPage.getViewport({ scale: 1.0 }); // Reduced from 1.5 to 1.0 for speed
+    
+    const coverCanvas = document.createElement('canvas');
+    coverCanvas.width = viewport.width;
+    coverCanvas.height = viewport.height;
+    const ctx = coverCanvas.getContext('2d');
+    
+    ctx.fillStyle = 'white';
+    ctx.fillRect(0, 0, coverCanvas.width, coverCanvas.height);
+    
+    await firstPage.render({
+        canvasContext: ctx,
+        viewport: viewport
+    }).promise;
+    
+    console.timeEnd('⏱️ Closed book cover render');
+    
+    // Create closed book overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'closed-book-overlay';
+    overlay.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.95);
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: opacity 0.5s ease;
+    `;
+    
+    // Create 3D book container
+    const bookContainer = document.createElement('div');
+    bookContainer.style.cssText = `
+        position: relative;
+        width: ${basePageWidth * 1.2}px;
+        height: ${basePageHeight * 1.2}px;
+        perspective: 2000px;
+        transform-style: preserve-3d;
+    `;
+    
+    // Create book wrapper for 3D effect
+    const book3D = document.createElement('div');
+    book3D.style.cssText = `
+        position: relative;
+        width: 100%;
+        height: 100%;
+        transform-style: preserve-3d;
+        transform: rotateY(-15deg) rotateX(5deg);
+        transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        animation: bookFloat 3s ease-in-out infinite;
+    `;
+    
+    // Front cover
+    const frontCover = document.createElement('div');
+    frontCover.style.cssText = `
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        background: white;
+        box-shadow: 
+            0 20px 60px rgba(0, 0, 0, 0.5),
+            inset -5px 0 15px rgba(0, 0, 0, 0.2);
+        border-radius: 0 8px 8px 0;
+        overflow: hidden;
+        transform-style: preserve-3d;
+    `;
+    
+    // Add rendered cover image
+    coverCanvas.style.cssText = `
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    `;
+    frontCover.appendChild(coverCanvas);
+    
+    // Book spine (thickness effect)
+    const numPages = pdfDoc.numPages;
+    const spineThickness = Math.min(50, Math.max(20, numPages * 0.5)); // 20-50px based on page count
+    
+    const spine = document.createElement('div');
+    spine.style.cssText = `
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: ${spineThickness}px;
+        height: 100%;
+        background: linear-gradient(to right, 
+            #2c2c2c 0%, 
+            #4a4a4a 20%, 
+            #5a5a5a 50%, 
+            #4a4a4a 80%, 
+            #2c2c2c 100%
+        );
+        transform-origin: right center;
+        transform: translateX(-100%) rotateY(-90deg);
+        box-shadow: 
+            inset 0 0 20px rgba(0, 0, 0, 0.5),
+            -5px 0 15px rgba(0, 0, 0, 0.3);
+        border-radius: 8px 0 0 8px;
+    `;
+    
+    // Add page edges effect
+    const pageEdges = document.createElement('div');
+    pageEdges.style.cssText = `
+        position: absolute;
+        right: 0;
+        top: 5%;
+        width: ${spineThickness - 5}px;
+        height: 90%;
+        background: repeating-linear-gradient(
+            to bottom,
+            #f5f5f5 0px,
+            #e0e0e0 1px,
+            #f5f5f5 2px
+        );
+        transform-origin: left center;
+        transform: translateX(-100%) rotateY(-90deg) translateZ(1px);
+        box-shadow: inset 2px 0 5px rgba(0, 0, 0, 0.2);
+    `;
+    spine.appendChild(pageEdges);
+    
+    // Click instruction overlay
+    const instruction = document.createElement('div');
+    instruction.style.cssText = `
+        position: absolute;
+        bottom: -80px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: white;
+        font-size: 1.2rem;
+        font-weight: 500;
+        text-align: center;
+        animation: pulse 2s ease-in-out infinite;
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+    `;
+    instruction.innerHTML = `
+        <i class="fas fa-hand-pointer" style="font-size: 2rem; display: block; margin-bottom: 0.5rem;"></i>
+        Cliquez pour ouvrir le livre
+    `;
+    
+    // Assemble 3D book
+    book3D.appendChild(spine);
+    book3D.appendChild(frontCover);
+    bookContainer.appendChild(book3D);
+    bookContainer.appendChild(instruction);
+    overlay.appendChild(bookContainer);
+    document.body.appendChild(overlay);
+    
+    // Add CSS animations
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes bookFloat {
+            0%, 100% { transform: rotateY(-15deg) rotateX(5deg) translateY(0); }
+            50% { transform: rotateY(-15deg) rotateX(5deg) translateY(-10px); }
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        #closed-book-overlay:hover #closed-book-overlay > div > div {
+            transform: rotateY(-5deg) rotateX(2deg) scale(1.05);
+        }
+    `;
+    document.head.appendChild(style);
+    
+    // Click to open animation
+    overlay.addEventListener('click', () => {
+        // Simple fade out animation (no flip)
+        overlay.style.opacity = '0';
+        
+        // Remove overlay and navigate to first content page
+        setTimeout(() => {
+            overlay.remove();
+            
+            // Navigate PageFlip to first content page (page 1 in PageFlip = page 2-3 spread)
+            // PageFlip uses 0-based index, page 1 shows pages 2-3 in spread mode
+            if (pageFlip && pdfDoc && pdfDoc.numPages > 1) {
+                // Turn to page 1 (which displays pages 2-3 in double-page mode)
+                pageFlip.turnToPage(1);
+                updatePageInfo();
+            }
+        }, 500);
+    });
+}
 
 // Event listeners
 if (thumbnailsBtn) {

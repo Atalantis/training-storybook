@@ -117,7 +117,8 @@ html, body {
 #flipbook-container .page canvas {
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: fill;  /* Fill the entire page without gaps */
+    display: block;  /* Remove any inline spacing */
 }
 
 /* Thumbnail panel */

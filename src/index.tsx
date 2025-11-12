@@ -13,8 +13,47 @@ type Bindings = {
 
 const app = new Hono<{ Bindings: Bindings }>()
 
+// Global security headers middleware
+app.use('*', async (c, next) => {
+  await next()
+  
+  // Set security headers
+  c.header('X-Frame-Options', 'SAMEORIGIN')
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=()')
+  
+  // Override for /view routes (allow embedding)
+  if (c.req.path.startsWith('/view')) {
+    c.header('X-Frame-Options', 'ALLOWALL')
+    c.header('Content-Security-Policy', 'frame-ancestors *')
+  }
+  
+  // Cache headers for static assets
+  if (c.req.path.startsWith('/static/')) {
+    c.header('Cache-Control', 'public, max-age=31536000, immutable')
+  }
+  
+  // No-cache for API routes
+  if (c.req.path.startsWith('/api/')) {
+    c.header('Cache-Control', 'no-cache, no-store, must-revalidate')
+    c.header('X-Robots-Tag', 'noindex')
+  }
+})
+
 // Enable CORS
 app.use('/api/*', cors())
+
+// Serve favicon (inline SVG - small file)
+const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#4f46e5" d="M19 2H6c-1.206 0-3 .799-3 3v14c0 2.201 1.794 3 3 3h15v-2H6.012C5.55 19.988 5 19.806 5 19s.55-.988 1.012-1H21V4c0-1.103-.897-2-2-2m0 14H5V5c0-.806.55-.988 1-1h13z"/></svg>`
+
+app.get('/favicon.svg', (c) => {
+  return c.body(faviconSVG, 200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000' })
+})
+
+app.get('/favicon.ico', (c) => {
+  return c.body(faviconSVG, 200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=31536000' })
+})
 
 // Serve static files
 app.use('/static/*', serveStatic({ root: './public' }))
@@ -594,6 +633,91 @@ app.delete('/api/admin/documents/:token', async (c) => {
   }
 })
 
+// Replace document file (for conversion)
+app.put('/api/admin/documents/:token/file', async (c) => {
+  try {
+    const token = c.req.param('token')
+    const db = c.env.DB
+    const pdfs = c.env.PDFS
+    
+    if (!db) {
+      return c.json({ error: 'Database not configured' }, 500)
+    }
+    
+    console.log('🔄 [REPLACE-FILE] Starting file replacement for token:', token)
+    
+    // Get existing document metadata
+    const doc = await db.prepare(`
+      SELECT * FROM documents WHERE token = ?
+    `).bind(token).first()
+    
+    if (!doc) {
+      console.error('❌ [REPLACE-FILE] Document not found:', token)
+      return c.json({ success: false, error: 'Document not found' }, 404)
+    }
+    
+    console.log('🔄 [REPLACE-FILE] Found document:', {
+      filename: doc.filename,
+      r2_key: doc.r2_key,
+      size: doc.size
+    })
+    
+    // Parse form data
+    const formData = await c.req.formData()
+    const file = formData.get('file') as File
+    
+    if (!file) {
+      console.error('❌ [REPLACE-FILE] No file provided')
+      return c.json({ success: false, error: 'No file provided' }, 400)
+    }
+    
+    console.log('🔄 [REPLACE-FILE] New file received:', {
+      name: file.name,
+      size: file.size,
+      type: file.type
+    })
+    
+    // Delete old file from R2
+    console.log('🔄 [REPLACE-FILE] Deleting old file from R2:', doc.r2_key)
+    await pdfs.delete(doc.r2_key as string)
+    
+    // Upload new file to R2 with same key
+    console.log('🔄 [REPLACE-FILE] Uploading new file to R2:', doc.r2_key)
+    const arrayBuffer = await file.arrayBuffer()
+    await pdfs.put(doc.r2_key as string, arrayBuffer, {
+      httpMetadata: {
+        contentType: 'application/pdf'
+      }
+    })
+    
+    // Update database with new file size
+    console.log('🔄 [REPLACE-FILE] Updating database with new size:', file.size)
+    await db.prepare(`
+      UPDATE documents 
+      SET size = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE token = ?
+    `).bind(file.size, token).run()
+    
+    console.log('✅ [REPLACE-FILE] File replacement completed successfully')
+    
+    return c.json({ 
+      success: true,
+      message: 'File replaced successfully',
+      newSize: file.size
+    })
+    
+  } catch (error: any) {
+    console.error('❌ [REPLACE-FILE] Error replacing file:', {
+      message: error.message,
+      stack: error.stack
+    })
+    return c.json({ 
+      success: false, 
+      error: `File replacement failed: ${error.message}` 
+    }, 500)
+  }
+})
+
 // Get PDF by token (public access)
 app.get('/api/documents/:token', async (c) => {
   try {
@@ -625,11 +749,12 @@ app.get('/api/documents/:token', async (c) => {
       return c.json({ success: false, error: 'PDF file not found' }, 404)
     }
     
-    // Return PDF
+    // Return PDF with RFC 5987 encoded filename for Unicode support
+    const encodedFilename = encodeURIComponent(doc.filename)
     return new Response(object.body, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="${doc.filename}"`,
+        'Content-Disposition': `inline; filename="${doc.filename}"; filename*=UTF-8''${encodedFilename}`,
         'Cache-Control': 'public, max-age=31536000'
       }
     })
@@ -648,7 +773,8 @@ app.get('/', (c) => {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Training Storybook - Solution de visualisation interactive</title>
-        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+        <link href="/static/tailwind.css" rel="stylesheet">
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
         <style>
             * {
@@ -1806,6 +1932,30 @@ app.get('/', (c) => {
                         Classez vos documents par client, projet ou toute classification personnelle. Totalement indépendant des tags de contenu.
                     </p>
                 </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">✅</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Gestion Multiple (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        Sélection par checkboxes + <strong>Shift+Click</strong> pour plages. Actions bulk : suppression, modification et déplacement groupés.
+                    </p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">🔄</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Conversion PDF (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        Convertissez vos PDF directement depuis la bibliothèque. Remplacement automatique du fichier original avec progress en temps réel.
+                    </p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">🎯</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Analyse Unitaire (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        Bouton d'analyse IA sur chaque document pour réanalyse ciblée. Idéal après modifications ou pour affiner les métadonnées.
+                    </p>
+                </div>
             </div>
 
             <!-- Demo Section -->
@@ -2188,6 +2338,30 @@ app.get('/en', (c) => {
                         Classify your documents by client, project, or any personal classification. Fully independent from content tags.
                     </p>
                 </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">✅</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Bulk Management (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        Checkbox selection + <strong>Shift+Click</strong> for ranges. Bulk actions: group deletion, modification, and movement.
+                    </p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">🔄</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">PDF Conversion (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        Convert PDFs directly from library. Automatic file replacement with real-time progress tracking.
+                    </p>
+                </div>
+                
+                <div class="feature-card">
+                    <span class="feature-icon">🎯</span>
+                    <h3 style="font-size: 1.3rem; margin-bottom: 0.75rem;">Individual Analysis (v1.2)</h3>
+                    <p style="opacity: 0.8; line-height: 1.6;">
+                        AI analysis button on each document for targeted re-analysis. Perfect after edits or to refine metadata.
+                    </p>
+                </div>
             </div>
 
             <!-- Demo Section -->
@@ -2281,7 +2455,8 @@ app.get('/admin', (c) => {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Administration - Training Storybook</title>
-        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+        <link href="/static/tailwind.css" rel="stylesheet">
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
         <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
@@ -2304,7 +2479,7 @@ app.get('/admin', (c) => {
     </head>
     <body>
         <div id="app"></div>
-        <script src="/static/admin.js"></script>
+        <script src="/static/admin.js?v=${Date.now()}"></script>
     </body>
     </html>
   `)
@@ -2322,7 +2497,8 @@ app.get('/view', (c) => {
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <title>Document non trouvé</title>
-          <script src="https://cdn.tailwindcss.com"></script>
+          <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+          <link href="/static/tailwind.css" rel="stylesheet">
       </head>
       <body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
           <div class="text-center">
@@ -2583,6 +2759,47 @@ async function getAIConfig(env: Bindings): Promise<{ enabled: boolean; apiKey: s
 /**
  * Analyze PDF with Google Gemini (Flash or Pro)
  */
+/**
+ * Retry utility with exponential backoff and jitter
+ * For 503 errors (overloaded) and network failures
+ */
+async function withRetry<T>(
+  fn: () => Promise<T>, 
+  options: { retries?: number; baseDelay?: number; maxDelay?: number } = {}
+): Promise<T> {
+  const { retries = 5, baseDelay = 500, maxDelay = 16000 } = options;
+  
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const is503 = error.message?.includes('503') || error.message?.includes('overloaded');
+      const isNetworkError = error.message?.includes('fetch') || error.message?.includes('network');
+      const isLastAttempt = attempt === retries - 1;
+      
+      // Only retry on 503 or network errors
+      if (!is503 && !isNetworkError) {
+        throw error;
+      }
+      
+      if (isLastAttempt) {
+        console.error(`❌ Max retries (${retries}) reached for:`, error.message);
+        throw error;
+      }
+      
+      // Exponential backoff with jitter: delay = base * 2^attempt + random(0, 200ms)
+      const exponentialDelay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
+      const jitter = Math.random() * 200;
+      const delay = exponentialDelay + jitter;
+      
+      console.log(`⚠️ Retry ${attempt + 1}/${retries} after ${Math.round(delay)}ms (${error.message})`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw new Error('Retry loop exhausted without success');
+}
+
 async function analyzeWithGemini(text: string, imageBase64: string | null, apiKey: string, isScanned: boolean = false, totalPages: number | null = null, sampledPages: number | null = null) {
   const hasText = text && text.trim().length > 0;
   const textContent = hasText 
@@ -2651,34 +2868,37 @@ ${textContent}`
     })
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts }],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 2048  // Increased for Gemini 2.5 Pro thinking tokens
-        }
-      })
+  // Wrap Gemini API call with retry logic (handles 503 overload errors)
+  const data = await withRetry(async () => {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 2048  // Increased for Gemini 2.5 Pro thinking tokens
+          }
+        })
+      }
+    )
+    
+    console.log('📡 Gemini Response:', {
+      status: response.status,
+      ok: response.ok,
+      statusText: response.statusText
+    })
+
+    if (!response.ok) {
+      const errorBody = await response.text()
+      console.error('❌ Gemini Error Body:', errorBody)
+      throw new Error(`Gemini API Error: ${response.status} - ${errorBody}`)
     }
-  )
-  
-  console.log('📡 Gemini Response:', {
-    status: response.status,
-    ok: response.ok,
-    statusText: response.statusText
-  })
 
-  if (!response.ok) {
-    const errorBody = await response.text()
-    console.error('❌ Gemini Error Body:', errorBody)
-    throw new Error(`Gemini API Error: ${response.status} - ${errorBody}`)
-  }
-
-  const data = await response.json()
+    return await response.json()
+  }, { retries: 5, baseDelay: 1000, maxDelay: 16000 })
   
   // Log full response for debugging
   console.log('📦 Gemini Full Response:', JSON.stringify(data, null, 2))

@@ -228,6 +228,204 @@ function shouldCompressPDF(file) {
     return file.size > threshold;
 }
 
+// ==========================================
+// PDF PAGE SPLITTING - Conditional split based on format
+// ==========================================
+/**
+ * Split PDF pages conditionally based on user options
+ * @param {Object} sourcePdf - PDF.js document object
+ * @param {Object} options - Split options
+ * @param {string} options.pageFormat - 'single' or 'double'
+ * @param {boolean} options.removeFirstLeft - Remove left part of first page (only if double)
+ * @param {boolean} options.skipFirstPage - Skip entire first page
+ * @param {number} options.quality - JPEG quality (0.1 to 1.0)
+ * @returns {Object} { pdfDoc: PDFDocument, stats: Object }
+ */
+async function splitPDFPages(sourcePdf, options = {}) {
+    DEBUG.group('📄 SPLIT PDF PAGES');
+    DEBUG.startTimer('Total Split Duration');
+    
+    const {
+        pageFormat = 'double',
+        removeFirstLeft = false,
+        skipFirstPage = false,
+        quality = 0.9
+    } = options;
+    
+    DEBUG.log('INFO', 'SPLIT_OPTIONS', 'Configuration', {
+        pageFormat,
+        removeFirstLeft,
+        skipFirstPage,
+        quality,
+        totalPages: sourcePdf.numPages
+    });
+    
+    const pageCount = sourcePdf.numPages;
+    const startPage = skipFirstPage ? 2 : 1;
+    const totalPages = skipFirstPage ? pageCount - 1 : pageCount;
+    
+    // Create new PDF for output
+    const newPdfDoc = await PDFLib.PDFDocument.create();
+    
+    let processedPages = 0;
+    let skippedFirstLeft = false;
+    
+    // Process each page
+    for (let i = startPage; i <= pageCount; i++) {
+        DEBUG.group(`📄 Page ${i}/${pageCount}`);
+        DEBUG.startTimer(`Page ${i} Processing`);
+        
+        const page = await sourcePdf.getPage(i);
+        
+        // Use high scale for maximum quality (4.0 = 4x resolution)
+        const viewport = page.getViewport({ scale: 4.0 });
+        
+        const width = viewport.width;
+        const height = viewport.height;
+        const halfWidth = width / 2;
+        
+        // Get original page size in points for PDF
+        const originalViewport = page.getViewport({ scale: 1.0 });
+        const pdfWidth = originalViewport.width;
+        const pdfHeight = originalViewport.height;
+        const pdfHalfWidth = pdfWidth / 2;
+        
+        DEBUG.log('DEBUG', 'PAGE_DIMENSIONS', `Page ${i}`, {
+            renderWidth: width,
+            renderHeight: height,
+            pdfWidth: pdfWidth.toFixed(2),
+            pdfHeight: pdfHeight.toFixed(2),
+            pdfHalfWidth: pdfHalfWidth.toFixed(2)
+        });
+        
+        // Render full page to canvas at high resolution
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        
+        DEBUG.startTimer(`Page ${i} Render`);
+        await page.render({
+            canvasContext: ctx,
+            viewport: viewport
+        }).promise;
+        DEBUG.endTimer(`Page ${i} Render`);
+        
+        // CONDITIONAL SPLIT LOGIC
+        if (pageFormat === 'single') {
+            // NO SPLIT - Keep page as is
+            DEBUG.log('INFO', 'NO_SPLIT', `Page ${i} kept as single page`, null);
+            
+            const imageData = canvas.toDataURL('image/jpeg', quality);
+            const imageBytes = await fetch(imageData).then(res => res.arrayBuffer());
+            const image = await newPdfDoc.embedJpg(imageBytes);
+            
+            const newPage = newPdfDoc.addPage([pdfWidth, pdfHeight]);
+            newPage.drawImage(image, {
+                x: 0,
+                y: 0,
+                width: pdfWidth,
+                height: pdfHeight,
+            });
+            
+            processedPages += 1;
+            
+        } else if (pageFormat === 'double') {
+            // SPLIT INTO TWO PAGES
+            DEBUG.log('INFO', 'SPLIT_MODE', `Page ${i} splitting into 2 halves`, {
+                firstPage: i === startPage,
+                removeFirstLeft: removeFirstLeft && i === startPage
+            });
+            
+            // Check if we should skip left half of first page
+            const shouldSkipLeft = (i === startPage && removeFirstLeft);
+            
+            if (shouldSkipLeft) {
+                DEBUG.log('WARNING', 'SKIP_FIRST_LEFT', `Skipping LEFT half of page ${i}`, null);
+                skippedFirstLeft = true;
+            }
+            
+            // Extract left half (unless skipped)
+            if (!shouldSkipLeft) {
+                DEBUG.startTimer(`Page ${i} Left Half`);
+                
+                const leftCanvas = document.createElement('canvas');
+                leftCanvas.width = halfWidth;
+                leftCanvas.height = height;
+                const leftCtx = leftCanvas.getContext('2d');
+                leftCtx.drawImage(canvas, 0, 0, halfWidth, height, 0, 0, halfWidth, height);
+                
+                const leftImageData = leftCanvas.toDataURL('image/jpeg', quality);
+                const leftImageBytes = await fetch(leftImageData).then(res => res.arrayBuffer());
+                const leftImage = await newPdfDoc.embedJpg(leftImageBytes);
+                
+                const leftPage = newPdfDoc.addPage([pdfHalfWidth, pdfHeight]);
+                leftPage.drawImage(leftImage, {
+                    x: 0,
+                    y: 0,
+                    width: pdfHalfWidth,
+                    height: pdfHeight,
+                });
+                
+                processedPages += 1;
+                DEBUG.endTimer(`Page ${i} Left Half`);
+                DEBUG.log('SUCCESS', 'LEFT_HALF', `Page ${i} left half created`, null);
+            }
+            
+            // Extract right half (always)
+            DEBUG.startTimer(`Page ${i} Right Half`);
+            
+            const rightCanvas = document.createElement('canvas');
+            rightCanvas.width = halfWidth;
+            rightCanvas.height = height;
+            const rightCtx = rightCanvas.getContext('2d');
+            rightCtx.drawImage(canvas, halfWidth, 0, halfWidth, height, 0, 0, halfWidth, height);
+            
+            const rightImageData = rightCanvas.toDataURL('image/jpeg', quality);
+            const rightImageBytes = await fetch(rightImageData).then(res => res.arrayBuffer());
+            const rightImage = await newPdfDoc.embedJpg(rightImageBytes);
+            
+            const rightPage = newPdfDoc.addPage([pdfHalfWidth, pdfHeight]);
+            rightPage.drawImage(rightImage, {
+                x: 0,
+                y: 0,
+                width: pdfHalfWidth,
+                height: pdfHeight,
+            });
+            
+            processedPages += 1;
+            DEBUG.endTimer(`Page ${i} Right Half`);
+            DEBUG.log('SUCCESS', 'RIGHT_HALF', `Page ${i} right half created`, null);
+        }
+        
+        DEBUG.endTimer(`Page ${i} Processing`);
+        DEBUG.groupEnd();
+        
+        // Update progress callback if provided
+        const progress = Math.round(((i - startPage + 1) / totalPages) * 100);
+        if (options.progressCallback) {
+            options.progressCallback(progress, i, totalPages);
+        }
+    }
+    
+    DEBUG.endTimer('Total Split Duration');
+    
+    const stats = {
+        sourcePages: pageCount,
+        processedPages: totalPages,
+        outputPages: processedPages,
+        skippedFirstPage: skipFirstPage,
+        skippedFirstLeft: skippedFirstLeft,
+        pageFormat: pageFormat,
+        quality: quality
+    };
+    
+    DEBUG.log('SUCCESS', 'SPLIT_COMPLETE', 'PDF split completed', stats);
+    DEBUG.groupEnd();
+    
+    return { pdfDoc: newPdfDoc, stats };
+}
+
 let isAuthenticated = false;
 
 // Check if already authenticated
@@ -376,106 +574,8 @@ function showAdminPanel() {
             <!-- Main Content -->
             <div class="max-w-7xl mx-auto px-4 py-8">
                 <!-- Library Tab Content -->
-                <div id="library-content">
-                <!-- Upload Section -->
-                <div class="bg-gray-800 rounded-xl shadow-xl p-6 mb-8 border border-gray-700">
-                    <h2 class="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <i class="fas fa-cloud-upload-alt text-blue-400"></i>
-                        Ajouter un Document
-                    </h2>
-                    
-                    <form id="upload-form" class="space-y-4">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-300 mb-2">Fichier PDF</label>
-                                <input 
-                                    type="file" 
-                                    id="pdf-file" 
-                                    accept=".pdf"
-                                    class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700"
-                                    required
-                                />
-                            </div>
-                            
-                            <div>
-                                <label class="block text-sm font-medium text-gray-300 mb-2">Description (optionnelle)</label>
-                                <input 
-                                    type="text" 
-                                    id="pdf-description" 
-                                    class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
-                                    placeholder="Ex: Formation bancassurance module 1"
-                                />
-                            </div>
-                        </div>
-                        
-                        <div id="upload-progress" class="hidden">
-                            <div class="bg-blue-900 rounded-lg p-4">
-                                <div class="flex items-center gap-3">
-                                    <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
-                                    <span class="text-white">Upload en cours...</span>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div id="upload-success" class="hidden bg-green-900 border border-green-700 rounded-lg p-4">
-                            <div class="flex items-start gap-3">
-                                <i class="fas fa-check-circle text-green-400 text-xl"></i>
-                                <div class="flex-1">
-                                    <p class="text-white font-semibold mb-2">Document ajouté avec succès !</p>
-                                    <div class="bg-gray-800 rounded p-3 flex items-center gap-2">
-                                        <input 
-                                            type="text" 
-                                            id="share-url" 
-                                            readonly 
-                                            class="flex-1 bg-transparent text-gray-300 text-sm"
-                                        />
-                                        <button 
-                                            type="button"
-                                            onclick="copyShareUrl()"
-                                            class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm"
-                                        >
-                                            <i class="fas fa-copy"></i> Copier
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <button 
-                            type="submit" 
-                            class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition flex items-center gap-2"
-                        >
-                            <i class="fas fa-upload"></i>
-                            Télécharger vers R2
-                        </button>
-                    </form>
-                </div>
-                
-                <!-- Documents List -->
-                <div class="bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-700">
-                    <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-xl font-bold text-white flex items-center gap-2">
-                            <i class="fas fa-list text-blue-400"></i>
-                            Documents Disponibles
-                        </h2>
-                        <button 
-                            onclick="loadDocuments()"
-                            class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition flex items-center gap-2"
-                        >
-                            <i class="fas fa-sync-alt"></i>
-                            Actualiser
-                        </button>
-                    </div>
-                    
-                    <div id="documents-list">
-                        <div class="text-center py-12">
-                            <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white mx-auto"></div>
-                            <p class="text-gray-400 mt-4">Chargement...</p>
-                        </div>
-                    </div>
-                </div>
-                </div>
-                <!-- End library-content -->
+                <!-- Library Tab Content (will be populated by showLibraryContent()) -->
+                <div id="library-content"></div>
                 
                 <!-- Converter Tab Content (hidden by default) -->
                 <div id="converter-content" class="hidden"></div>
@@ -521,12 +621,24 @@ function switchTab(tabName) {
 function showLibraryContent() {
     const content = document.getElementById('library-content');
     content.innerHTML = `
-        <!-- Upload Section -->
-        <div class="bg-gray-800 rounded-xl shadow-xl p-6 mb-8 border border-gray-700">
-            <h2 class="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <i class="fas fa-cloud-upload-alt text-blue-400"></i>
-                Ajouter un Document
-            </h2>
+            <!-- Upload Section (Accordion - Collapsed by Default) -->
+            <div class="bg-gray-800 rounded-xl shadow-xl mb-8 border border-gray-700">
+                <!-- Accordion Header (Clickable) -->
+                <button 
+                    onclick="toggleUploadAccordion()" 
+                    class="w-full px-6 py-4 flex items-center justify-between text-left hover:bg-gray-700 transition rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    id="upload-accordion-header"
+                >
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-cloud-upload-alt text-blue-400"></i>
+                        Ajouter un Document
+                    </h2>
+                    <i class="fas fa-chevron-down text-gray-400 transition-transform duration-200" id="upload-accordion-icon"></i>
+                </button>
+                
+                <!-- Accordion Content (Collapsible - Hidden by Default) -->
+                <div id="upload-accordion-content" class="hidden">
+                    <div class="px-6 pb-6 pt-2">
             
             <form id="upload-form" class="space-y-4">
                 <div>
@@ -549,17 +661,6 @@ function showLibraryContent() {
                         <!-- Files will be listed here -->
                     </div>
                     
-                    <!-- AI Analysis Button -->
-                    <button type="button" 
-                            onclick="analyzeUploadFile()" 
-                            id="ai-analyze-btn"
-                            class="mt-2 w-full px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition flex items-center justify-center gap-2">
-                        <i class="fas fa-magic"></i>
-                        ✨ Analyser avec IA
-                    </button>
-                    <p class="text-xs text-gray-500 mt-1">
-                        Génère automatiquement la description, les tags et le dossier. Pour l'upload multiple, cette analyse s'appliquera à tous les fichiers.
-                    </p>
                 </div>
                 
                 <!-- NEW: Page Split Options for Upload -->
@@ -681,15 +782,24 @@ function showLibraryContent() {
                     Télécharger vers R2
                 </button>
             </form>
-        </div>
+            
+                    </div>
+                </div>
+            </div>
         
         <!-- Documents List -->
         <div class="bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-700">
             <div class="flex justify-between items-center mb-6">
-                <h2 class="text-xl font-bold text-white flex items-center gap-2">
-                    <i class="fas fa-list text-blue-400"></i>
-                    Documents Disponibles
-                </h2>
+                <div class="flex items-center gap-4">
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-list text-blue-400"></i>
+                        Documents Disponibles
+                    </h2>
+                    <label class="flex items-center gap-2 cursor-pointer bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg transition" title="Tout sélectionner / Tout désélectionner">
+                        <input type="checkbox" id="select-all-docs" onchange="toggleSelectAll()" class="w-4 h-4 cursor-pointer">
+                        <span class="text-white text-sm">Tout sélectionner</span>
+                    </label>
+                </div>
                 <div class="flex gap-2">
                     <button 
                         onclick="loadDocuments()"
@@ -753,6 +863,55 @@ function showLibraryContent() {
                 <div class="text-center py-12">
                     <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white mx-auto"></div>
                     <p class="text-gray-400 mt-4">Chargement...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bulk Actions Floating Bar (hidden by default) -->
+        <div id="bulk-actions-bar" class="hidden fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl shadow-2xl p-4 z-50 border-2 border-white/20">
+            <div class="flex items-center gap-4">
+                <div class="text-white font-semibold flex items-center gap-2">
+                    <i class="fas fa-check-circle"></i>
+                    <span id="selected-count">0</span> document(s) sélectionné(s)
+                </div>
+                
+                <div class="h-8 w-px bg-white/30"></div>
+                
+                <div class="flex gap-2">
+                    <button 
+                        onclick="bulkEditDocuments()"
+                        class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                        title="Modifier les documents sélectionnés"
+                    >
+                        <i class="fas fa-edit"></i>
+                        Modifier
+                    </button>
+                    
+                    <button 
+                        onclick="bulkMoveDocuments()"
+                        class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                        title="Déplacer vers un dossier"
+                    >
+                        <i class="fas fa-folder"></i>
+                        Déplacer
+                    </button>
+                    
+                    <button 
+                        onclick="bulkDeleteDocuments()"
+                        class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                        title="Supprimer les documents sélectionnés"
+                    >
+                        <i class="fas fa-trash"></i>
+                        Supprimer
+                    </button>
+                    
+                    <button 
+                        onclick="clearSelection()"
+                        class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition font-semibold"
+                        title="Annuler la sélection"
+                    >
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
             </div>
         </div>
@@ -1149,132 +1308,111 @@ async function handleConversion(e) {
     progressDiv.classList.remove('hidden');
     
     try {
-        const file = fileInput.files[0];
+        DEBUG.group('🔧 CONVERTER PROCESS START');
+        
+        let file = fileInput.files[0];
         if (!file) {
             throw new Error('Veuillez sélectionner un fichier PDF');
         }
         
-        // Get options
+        const originalFileSize = file.size;
+        
+        DEBUG.log('INFO', 'FILE_INFO', 'Selected file', {
+            name: file.name,
+            size: (file.size / 1024 / 1024).toFixed(2) + ' MB',
+            type: file.type
+        });
+        
+        // Get user options from UI
+        const convertPageFormat = document.querySelector('input[name="page-format"]:checked')?.value || 'double';
+        const convertRemoveFirstLeft = document.getElementById('remove-first-left')?.checked || false;
         const skipFirstPage = document.getElementById('skip-first-page').checked;
         const quality = parseFloat(document.getElementById('quality-select').value);
         
-        // Read PDF with pdf.js
+        DEBUG.log('INFO', 'USER_OPTIONS', 'Conversion options', {
+            pageFormat: convertPageFormat,
+            removeFirstLeft: convertRemoveFirstLeft,
+            skipFirstPage,
+            quality
+        });
+        
+        // STEP 1: COMPRESSION (if file is large)
+        if (shouldCompressPDF(file)) {
+            const progressText = progressDiv.querySelector('.text-white');
+            if (progressText) {
+                progressText.textContent = '🗜️ Compression en cours...';
+            }
+            
+            DEBUG.log('INFO', 'CONVERTER_COMPRESS', 'Starting compression', {
+                originalSize: (originalFileSize / 1024 / 1024).toFixed(2) + ' MB'
+            });
+            
+            const progressCallback = (message, percent) => {
+                if (progressText) {
+                    progressText.textContent = message;
+                }
+            };
+            
+            const { compressedFile, originalSize, compressedSize, compressionRatio } = await compressPDF(file, progressCallback);
+            
+            file = compressedFile;
+            
+            DEBUG.log('SUCCESS', 'CONVERTER_COMPRESS', 'Compression completed', {
+                originalSize: (originalSize / 1024 / 1024).toFixed(2) + ' MB',
+                compressedSize: (compressedSize / 1024 / 1024).toFixed(2) + ' MB',
+                ratio: compressionRatio + '%'
+            });
+        }
+        
+        // STEP 2: Read PDF with pdf.js
         const arrayBuffer = await file.arrayBuffer();
         const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
         const sourcePdf = await loadingTask.promise;
         
         const pageCount = sourcePdf.numPages;
         
-        console.log(`Converting PDF: ${pageCount} pages (quality: ${quality}), skip first: ${skipFirstPage}`);
-        
-        // Create new PDF for A5 booklet format
-        const newPdfDoc = await PDFLib.PDFDocument.create();
-        
-        // Array to store all A5 pages before conditionally removing first
-        const a5Pages = [];
-        
-        // Process each page - split A3 into 2 A5 pages
-        for (let i = 1; i <= pageCount; i++) {
-            const page = await sourcePdf.getPage(i);
-            
-            // Use high scale for maximum quality (4.0 = 4x resolution)
-            const viewport = page.getViewport({ scale: 4.0 });
-            
-            const width = viewport.width;
-            const height = viewport.height;
-            const halfWidth = width / 2;
-            
-            // Get original page size in points for PDF
-            const originalViewport = page.getViewport({ scale: 1.0 });
-            const pdfWidth = originalViewport.width;
-            const pdfHeight = originalViewport.height;
-            const pdfHalfWidth = pdfWidth / 2;
-            
-            console.log(`Page ${i}: ${pdfWidth.toFixed(2)} x ${pdfHeight.toFixed(2)} pts`);
-            
-            // Render full page to canvas at high resolution
-            const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            
-            await page.render({
-                canvasContext: ctx,
-                viewport: viewport
-            }).promise;
-            
-            // Extract left half
-            const leftCanvas = document.createElement('canvas');
-            leftCanvas.width = halfWidth;
-            leftCanvas.height = height;
-            const leftCtx = leftCanvas.getContext('2d');
-            leftCtx.drawImage(canvas, 0, 0, halfWidth, height, 0, 0, halfWidth, height);
-            
-            // Extract right half
-            const rightCanvas = document.createElement('canvas');
-            rightCanvas.width = halfWidth;
-            rightCanvas.height = height;
-            const rightCtx = rightCanvas.getContext('2d');
-            rightCtx.drawImage(canvas, halfWidth, 0, halfWidth, height, 0, 0, halfWidth, height);
-            
-            // Convert left to JPEG with selected quality
-            const leftImageData = leftCanvas.toDataURL('image/jpeg', quality);
-            const leftImageBytes = await fetch(leftImageData).then(res => res.arrayBuffer());
-            const leftImage = await newPdfDoc.embedJpg(leftImageBytes);
-            
-            // Store left page data
-            a5Pages.push({
-                image: leftImage,
-                width: pdfHalfWidth,
-                height: pdfHeight
-            });
-            
-            // Convert right to JPEG
-            const rightImageData = rightCanvas.toDataURL('image/jpeg', quality);
-            const rightImageBytes = await fetch(rightImageData).then(res => res.arrayBuffer());
-            const rightImage = await newPdfDoc.embedJpg(rightImageBytes);
-            
-            // Store right page data
-            a5Pages.push({
-                image: rightImage,
-                width: pdfHalfWidth,
-                height: pdfHeight
-            });
-            
-            // Update progress
-            const progress = Math.round((i / pageCount) * 100);
-            const progressText = progressDiv.querySelector('.text-white');
-            if (progressText) {
-                progressText.textContent = `Conversion en cours... ${progress}%`;
+        // Use the splitPDFPages function with progress callback
+        const { pdfDoc: newPdfDoc, stats } = await splitPDFPages(sourcePdf, {
+            pageFormat: convertPageFormat,
+            removeFirstLeft: convertRemoveFirstLeft,
+            skipFirstPage: skipFirstPage,
+            quality: quality,
+            progressCallback: (progress, currentPage, total) => {
+                const progressText = progressDiv.querySelector('.text-white');
+                if (progressText) {
+                    progressText.textContent = `Conversion en cours... ${progress}% (page ${currentPage}/${total})`;
+                }
             }
-        }
+        });
         
-        // Now add pages to PDF, skipping first if requested
-        const startIndex = skipFirstPage ? 1 : 0;
-        const finalPageCount = a5Pages.length - startIndex;
-        
-        console.log(`Total A5 pages: ${a5Pages.length}, starting from index ${startIndex}, final count: ${finalPageCount}`);
-        
-        for (let i = startIndex; i < a5Pages.length; i++) {
-            const pageData = a5Pages[i];
-            const page = newPdfDoc.addPage([pageData.width, pageData.height]);
-            page.drawImage(pageData.image, {
-                x: 0,
-                y: 0,
-                width: pageData.width,
-                height: pageData.height,
-            });
-        }
+        DEBUG.log('SUCCESS', 'SPLIT_STATS', 'Split statistics', stats);
         
         // Save the PDF
+        DEBUG.startTimer('PDF Save');
         const pdfBytes = await newPdfDoc.save();
+        DEBUG.endTimer('PDF Save');
+        
         convertedPDFBlob = new Blob([pdfBytes], { type: 'application/pdf' });
         convertedFilename = file.name.replace('.pdf', '_livret_A5.pdf');
         
         const fileSizeMB = (pdfBytes.length / 1024 / 1024).toFixed(2);
-        const originalSizeMB = (arrayBuffer.byteLength / 1024 / 1024).toFixed(2);
+        const originalSizeMB = (originalFileSize / 1024 / 1024).toFixed(2);
+        const finalSizeMB = (pdfBytes.length / 1024 / 1024).toFixed(2);
+        const totalCompressionRatio = ((1 - pdfBytes.length / originalFileSize) * 100).toFixed(1);
         
-        console.log(`Conversion completed: ${finalPageCount} pages, ${fileSizeMB} MB${skipFirstPage ? ' (première page A5 supprimée)' : ''}`);
+        DEBUG.log('SUCCESS', 'FILE_SIZES', 'Size comparison', {
+            original: originalSizeMB + ' MB',
+            final: finalSizeMB + ' MB',
+            totalCompression: totalCompressionRatio + '%',
+            outputPages: stats.outputPages
+        });
+        
+        const pageText = convertPageFormat === 'single' 
+            ? `${stats.outputPages} pages conservées`
+            : `${stats.outputPages} pages créées`;
+        
+        DEBUG.log('SUCCESS', 'CONVERTER_COMPLETE', 'Conversion process finished successfully', null);
+        DEBUG.groupEnd();
         
         // Hide progress, show success
         progressDiv.classList.add('hidden');
@@ -1576,13 +1714,24 @@ async function handleUpload(e) {
             const statusSpan = document.getElementById('batch-upload-status');
             const detailsDiv = document.getElementById('batch-progress-details');
             
-            // Compress large files first
+            // Get upload split options from UI
+            const uploadPageFormat = document.querySelector('input[name="upload-page-format"]:checked')?.value || 'single';
+            const uploadRemoveFirstLeft = document.getElementById('upload-remove-first-left')?.checked || false;
+            
+            DEBUG.log('INFO', 'BATCH-UPLOAD-OPTIONS', 'Split options', {
+                pageFormat: uploadPageFormat,
+                removeFirstLeft: uploadRemoveFirstLeft
+            });
+            
+            // Process files: Compress → Split
             const processedFiles = [];
             let totalSaved = 0;
             
             for (let i = 0; i < files.length; i++) {
-                const file = files[i];
+                let file = files[i];
+                const originalFileSize = file.size;
                 
+                // STEP 1: COMPRESSION (if needed)
                 if (shouldCompressPDF(file)) {
                     statusSpan.textContent = `🗜️ Compression ${i + 1}/${files.length}: ${file.name}...`;
                     detailsDiv.innerHTML += `<div class="text-sm text-yellow-300">🗜️ Compression: ${file.name} (${formatBytes(file.size)})</div>`;
@@ -1593,14 +1742,46 @@ async function handleUpload(e) {
                     
                     const { compressedFile, originalSize, compressedSize, compressionRatio } = await compressPDF(file, progressCallback);
                     
-                    processedFiles.push(compressedFile);
+                    file = compressedFile;
                     totalSaved += (originalSize - compressedSize);
                     
-                    detailsDiv.innerHTML += `<div class="text-sm text-green-300">✅ ${file.name}: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)} (-${compressionRatio}%)</div>`;
+                    detailsDiv.innerHTML += `<div class="text-sm text-green-300">✅ Compressé: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)} (-${compressionRatio}%)</div>`;
                 } else {
-                    processedFiles.push(file);
                     detailsDiv.innerHTML += `<div class="text-sm text-gray-300">✓ ${file.name}: ${formatBytes(file.size)} (aucune compression nécessaire)</div>`;
                 }
+                
+                // STEP 2: SPLIT (if pages doubles selected)
+                if (uploadPageFormat === 'double') {
+                    statusSpan.textContent = `📄 Split pages ${i + 1}/${files.length}: ${file.name}...`;
+                    detailsDiv.innerHTML += `<div class="text-sm text-cyan-300">📄 Split en pages doubles...</div>`;
+                    
+                    // Read PDF with pdf.js
+                    const arrayBuffer = await file.arrayBuffer();
+                    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                    const sourcePdf = await loadingTask.promise;
+                    
+                    // Apply split
+                    const { pdfDoc: splitPdfDoc, stats } = await splitPDFPages(sourcePdf, {
+                        pageFormat: uploadPageFormat,
+                        removeFirstLeft: uploadRemoveFirstLeft,
+                        skipFirstPage: false,
+                        quality: 0.85,
+                        progressCallback: (progress, currentPage, total) => {
+                            statusSpan.textContent = `📄 Split ${i + 1}/${files.length}: ${progress}% (page ${currentPage}/${total})`;
+                        }
+                    });
+                    
+                    // Save split PDF
+                    const splitPdfBytes = await splitPdfDoc.save();
+                    const splitFilename = file.name.replace('.pdf', '_split.pdf');
+                    file = new File([splitPdfBytes], splitFilename, { type: 'application/pdf' });
+                    
+                    detailsDiv.innerHTML += `<div class="text-sm text-green-300">✅ Split: ${stats.sourcePages} → ${stats.outputPages} pages</div>`;
+                    
+                    DEBUG.log('SUCCESS', 'BATCH-SPLIT', `File ${i + 1} split completed`, stats);
+                }
+                
+                processedFiles.push(file);
             }
             
             if (totalSaved > 0) {
@@ -1648,10 +1829,10 @@ async function handleUpload(e) {
                 
                 await Promise.all(updatePromises);
                 
-                // Show success summary
+                // Show success summary with AI analysis prompt
                 successDiv.innerHTML = `
                     <div class="bg-green-900 border border-green-700 rounded-lg p-4">
-                        <div class="flex items-start gap-3">
+                        <div class="flex items-start gap-3 mb-3">
                             <i class="fas fa-check-circle text-green-400 text-xl"></i>
                             <div class="flex-1">
                                 <p class="text-white font-semibold mb-2">Upload par lot réussi !</p>
@@ -1659,6 +1840,27 @@ async function handleUpload(e) {
                                     <p>✅ ${data.uploaded} fichiers uploadés</p>
                                     ${data.failed > 0 ? `<p class="text-red-400">❌ ${data.failed} échecs</p>` : ''}
                                 </div>
+                            </div>
+                        </div>
+                        <div class="border-t border-green-700 pt-3">
+                            <p class="text-white text-sm mb-2">
+                                <i class="fas fa-magic text-purple-400 mr-2"></i>
+                                Voulez-vous analyser ces documents avec l'IA maintenant ?
+                            </p>
+                            <div class="flex gap-2">
+                                <button 
+                                    onclick="openBatchAnalyze(); document.getElementById('upload-success').classList.add('hidden');"
+                                    class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition text-sm font-medium"
+                                >
+                                    <i class="fas fa-play mr-2"></i>
+                                    Analyser par lot
+                                </button>
+                                <button 
+                                    onclick="document.getElementById('upload-success').classList.add('hidden');"
+                                    class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition text-sm"
+                                >
+                                    Plus tard
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -1683,21 +1885,32 @@ async function handleUpload(e) {
             let file = files[0];
             DEBUG.info('SINGLE-UPLOAD', `File: ${file.name} (${formatBytes(file.size)})`);
             
-            // Compress if needed
-            if (shouldCompressPDF(file)) {
-                progressDiv.innerHTML = `
-                    <div class="bg-blue-900 rounded-lg p-4">
-                        <div class="flex items-center gap-3 mb-2">
-                            <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
-                            <span class="text-white" id="single-upload-status">🗜️ Compression en cours...</span>
-                        </div>
-                        <div class="mt-2 space-y-2 text-sm text-gray-300" id="single-progress-details"></div>
+            // Get upload split options from UI [UPDATED 2025-01-12 03:48]
+            const uploadPageFormat = document.querySelector('input[name="upload-page-format"]:checked')?.value || 'single';
+            const uploadRemoveFirstLeft = document.getElementById('upload-remove-first-left')?.checked || false;
+            
+            DEBUG.log('INFO', 'SINGLE-UPLOAD-OPTIONS', 'Split options', {
+                pageFormat: uploadPageFormat,
+                removeFirstLeft: uploadRemoveFirstLeft
+            });
+            
+            // Setup progress UI
+            progressDiv.innerHTML = `
+                <div class="bg-blue-900 rounded-lg p-4">
+                    <div class="flex items-center gap-3 mb-2">
+                        <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
+                        <span class="text-white" id="single-upload-status">⏳ Traitement en cours...</span>
                     </div>
-                `;
-                
-                const statusSpan = document.getElementById('single-upload-status');
-                const detailsDiv = document.getElementById('single-progress-details');
-                
+                    <div class="mt-2 space-y-2 text-sm text-gray-300" id="single-progress-details"></div>
+                </div>
+            `;
+            
+            const statusSpan = document.getElementById('single-upload-status');
+            const detailsDiv = document.getElementById('single-progress-details');
+            
+            // STEP 1: COMPRESSION (if needed)
+            if (shouldCompressPDF(file)) {
+                statusSpan.textContent = '🗜️ Compression en cours...';
                 detailsDiv.innerHTML = `<div class="text-yellow-300">🗜️ Fichier volumineux détecté (${formatBytes(file.size)})</div>`;
                 
                 const progressCallback = (message, percent) => {
@@ -1711,18 +1924,40 @@ async function handleUpload(e) {
                 
                 detailsDiv.innerHTML += `<div class="text-green-300">✅ Compression terminée: ${formatBytes(originalSize)} → ${formatBytes(compressedSize)} (-${compressionRatio}%)</div>`;
                 detailsDiv.innerHTML += `<div class="text-green-400 font-semibold">💾 Économisé: ${formatBytes(originalSize - compressedSize)}</div>`;
-                
-                statusSpan.textContent = '📤 Upload vers le serveur...';
-            } else {
-                progressDiv.innerHTML = `
-                    <div class="bg-blue-900 rounded-lg p-4">
-                        <div class="flex items-center gap-3">
-                            <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
-                            <span class="text-white">📤 Upload en cours...</span>
-                        </div>
-                    </div>
-                `;
             }
+            
+            // STEP 2: SPLIT (if pages doubles selected)
+            if (uploadPageFormat === 'double') {
+                statusSpan.textContent = '📄 Split en pages doubles...';
+                detailsDiv.innerHTML += `<div class="text-cyan-300">📄 Découpage des pages en cours...</div>`;
+                
+                // Read PDF with pdf.js
+                const arrayBuffer = await file.arrayBuffer();
+                const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                const sourcePdf = await loadingTask.promise;
+                
+                // Apply split
+                const { pdfDoc: splitPdfDoc, stats } = await splitPDFPages(sourcePdf, {
+                    pageFormat: uploadPageFormat,
+                    removeFirstLeft: uploadRemoveFirstLeft,
+                    skipFirstPage: false,
+                    quality: 0.85,
+                    progressCallback: (progress, currentPage, total) => {
+                        statusSpan.textContent = `📄 Split: ${progress}% (page ${currentPage}/${total})`;
+                    }
+                });
+                
+                // Save split PDF
+                const splitPdfBytes = await splitPdfDoc.save();
+                const splitFilename = file.name.replace('.pdf', '_split.pdf');
+                file = new File([splitPdfBytes], splitFilename, { type: 'application/pdf' });
+                
+                detailsDiv.innerHTML += `<div class="text-green-300">✅ Split: ${stats.sourcePages} → ${stats.outputPages} pages</div>`;
+                
+                DEBUG.log('SUCCESS', 'SINGLE-SPLIT', 'File split completed', stats);
+            }
+            
+            statusSpan.textContent = '📤 Upload vers le serveur...';
             
             const formData = new FormData();
             formData.append('file', file);
@@ -1776,6 +2011,41 @@ async function handleUpload(e) {
 
 // Global state for documents and filters
 let allDocuments = [];
+let selectedDocuments = []; // For bulk actions
+
+// Helper function to safely parse tags (handles both string and array formats)
+function parseTags(tagsValue) {
+    // Handle undefined/null
+    if (!tagsValue) {
+        return [];
+    }
+    
+    // Already an array
+    if (Array.isArray(tagsValue)) {
+        return tagsValue;
+    }
+    
+    // String - try to parse as JSON
+    if (typeof tagsValue === 'string') {
+        // Empty string
+        if (!tagsValue.trim()) {
+            return [];
+        }
+        
+        try {
+            const parsed = JSON.parse(tagsValue);
+            // Ensure parsed result is an array
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            // If JSON parse fails, maybe it's a comma-separated string?
+            // Return empty array for safety
+            return [];
+        }
+    }
+    
+    // Fallback for any other type
+    return [];
+}
 
 async function loadDocuments() {
     const listDiv = document.getElementById('documents-list');
@@ -1845,12 +2115,8 @@ function populateTagFilter() {
     // Extract unique tags
     const tagsSet = new Set();
     allDocuments.forEach(doc => {
-        try {
-            const tags = JSON.parse(doc.tags || '[]');
-            tags.forEach(tag => tagsSet.add(tag));
-        } catch (e) {
-            // Ignore parse errors
-        }
+        const tags = parseTags(doc.tags);
+        tags.forEach(tag => tagsSet.add(tag));
     });
     
     const tags = [...tagsSet].sort();
@@ -1893,12 +2159,8 @@ function filterDocuments() {
         
         // Tag filter
         if (selectedTag) {
-            try {
-                const tags = JSON.parse(doc.tags || '[]');
-                if (!tags.includes(selectedTag)) {
-                    return false;
-                }
-            } catch (e) {
+            const tags = parseTags(doc.tags);
+            if (!tags.includes(selectedTag)) {
                 return false;
             }
         }
@@ -1930,21 +2192,9 @@ function renderDocument(doc) {
     
     const shareUrl = `${window.location.origin}/view?doc=${doc.token}`;
     
-    // Parse tags
-    let tags = [];
-    try {
-        tags = JSON.parse(doc.tags || '[]');
-    } catch (e) {
-        tags = [];
-    }
-    
-    // Parse client_tags
-    let clientTags = [];
-    try {
-        clientTags = JSON.parse(doc.client_tags || '[]');
-    } catch (e) {
-        clientTags = [];
-    }
+    // Parse tags and client_tags using helper
+    const tags = parseTags(doc.tags);
+    const clientTags = parseTags(doc.client_tags);
     
     // Render tags badges
     const tagsHtml = tags.length > 0 
@@ -1962,8 +2212,18 @@ function renderDocument(doc) {
         : '<span class="text-gray-500 text-xs italic">Aucun dossier</span>';
     
     return `
-        <div class="bg-gray-700 rounded-lg p-4 mb-4 border border-gray-600 hover:border-blue-500 transition">
-            <div class="flex items-start justify-between">
+        <div class="bg-gray-700 rounded-lg p-4 mb-4 border border-gray-600 hover:border-blue-500 transition" id="doc-${doc.token}">
+            <div class="flex items-start gap-3">
+                <!-- Checkbox for bulk selection -->
+                <div class="pt-1">
+                    <input 
+                        type="checkbox" 
+                        class="doc-checkbox w-5 h-5 cursor-pointer" 
+                        data-token="${doc.token}"
+                        onchange="toggleDocumentSelection('${doc.token}', event)"
+                    >
+                </div>
+                
                 <div class="flex-1">
                     <h3 class="text-white font-semibold text-lg mb-1 flex items-center gap-2">
                         <i class="fas fa-file-pdf text-red-400"></i>
@@ -2007,6 +2267,13 @@ function renderDocument(doc) {
                         <i class="fas fa-share-alt"></i>
                     </button>
                     <button 
+                        onclick="openConvertModal('${doc.token}', '${doc.filename.replace(/'/g, "\\'")}')"
+                        class="bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 rounded transition"
+                        title="Convertir (Split pages, format livret)"
+                    >
+                        <i class="fas fa-cog"></i>
+                    </button>
+                    <button 
                         onclick="openEditModal('${doc.token}')"
                         class="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-2 rounded transition"
                         title="Éditer (description, tags, dossier)"
@@ -2036,6 +2303,13 @@ function renderDocument(doc) {
                         <i class="fas fa-external-link-alt"></i>
                     </a>
                     <button 
+                        onclick="reanalyzeDocument('${doc.token}')"
+                        class="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-3 py-2 rounded transition"
+                        title="Analyser avec IA (consomme des crédits)"
+                    >
+                        <i class="fas fa-magic"></i>
+                    </button>
+                    <button 
                         onclick="deleteDocument('${doc.token}', '${doc.filename}')"
                         class="bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded transition"
                         title="Supprimer"
@@ -2043,6 +2317,7 @@ function renderDocument(doc) {
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
+            </div>
             </div>
         </div>
     `;
@@ -2055,12 +2330,7 @@ function openEditModal(token) {
     if (!doc) return;
     
     // Parse current tags
-    let tags = [];
-    try {
-        tags = JSON.parse(doc.tags || '[]');
-    } catch (e) {
-        tags = [];
-    }
+    const tags = parseTags(doc.tags);
     
     // Create modal
     const modal = document.createElement('div');
@@ -2750,6 +3020,657 @@ async function deleteDocument(token, filename) {
     } catch (error) {
         console.error('Delete error:', error);
         alert('Erreur lors de la suppression');
+    }
+}
+
+// ==========================================
+// BULK ACTIONS - Selection Management
+// ==========================================
+
+// Track last clicked document for shift-selection
+let lastClickedToken = null;
+
+function toggleDocumentSelection(token, event) {
+    const checkbox = document.querySelector(`.doc-checkbox[data-token="${token}"]`);
+    const docCard = document.getElementById(`doc-${token}`);
+    
+    // Handle Shift+Click for range selection
+    if (event && event.shiftKey && lastClickedToken && lastClickedToken !== token) {
+        handleShiftSelection(lastClickedToken, token, checkbox.checked);
+        lastClickedToken = token;
+        updateBulkActionsBar();
+        updateSelectAllCheckbox();
+        return;
+    }
+    
+    // Normal single selection
+    if (checkbox.checked) {
+        if (!selectedDocuments.includes(token)) {
+            selectedDocuments.push(token);
+            docCard.classList.add('border-blue-500', 'bg-gray-600');
+        }
+    } else {
+        selectedDocuments = selectedDocuments.filter(t => t !== token);
+        docCard.classList.remove('border-blue-500', 'bg-gray-600');
+    }
+    
+    lastClickedToken = token;
+    updateBulkActionsBar();
+    updateSelectAllCheckbox();
+}
+
+function handleShiftSelection(startToken, endToken, shouldSelect) {
+    // Get all visible document tokens in order
+    const allCheckboxes = Array.from(document.querySelectorAll('.doc-checkbox'));
+    const visibleTokens = allCheckboxes.map(cb => cb.getAttribute('data-token'));
+    
+    // Find start and end indices
+    const startIndex = visibleTokens.indexOf(startToken);
+    const endIndex = visibleTokens.indexOf(endToken);
+    
+    if (startIndex === -1 || endIndex === -1) return;
+    
+    // Determine range (handle both directions)
+    const rangeStart = Math.min(startIndex, endIndex);
+    const rangeEnd = Math.max(startIndex, endIndex);
+    
+    // Select/deselect all documents in range
+    for (let i = rangeStart; i <= rangeEnd; i++) {
+        const token = visibleTokens[i];
+        const checkbox = document.querySelector(`.doc-checkbox[data-token="${token}"]`);
+        const docCard = document.getElementById(`doc-${token}`);
+        
+        if (shouldSelect) {
+            checkbox.checked = true;
+            if (!selectedDocuments.includes(token)) {
+                selectedDocuments.push(token);
+            }
+            docCard.classList.add('border-blue-500', 'bg-gray-600');
+        } else {
+            checkbox.checked = false;
+            selectedDocuments = selectedDocuments.filter(t => t !== token);
+            docCard.classList.remove('border-blue-500', 'bg-gray-600');
+        }
+    }
+}
+
+function toggleSelectAll() {
+    const selectAllCheckbox = document.getElementById('select-all-docs');
+    const allCheckboxes = document.querySelectorAll('.doc-checkbox');
+    
+    allCheckboxes.forEach(checkbox => {
+        checkbox.checked = selectAllCheckbox.checked;
+        const token = checkbox.getAttribute('data-token');
+        
+        if (selectAllCheckbox.checked) {
+            if (!selectedDocuments.includes(token)) {
+                selectedDocuments.push(token);
+            }
+            document.getElementById(`doc-${token}`).classList.add('border-blue-500', 'bg-gray-600');
+        } else {
+            selectedDocuments = [];
+            document.getElementById(`doc-${token}`).classList.remove('border-blue-500', 'bg-gray-600');
+        }
+    });
+    
+    updateBulkActionsBar();
+}
+
+function updateSelectAllCheckbox() {
+    const selectAllCheckbox = document.getElementById('select-all-docs');
+    const allCheckboxes = document.querySelectorAll('.doc-checkbox');
+    
+    if (allCheckboxes.length === 0) {
+        selectAllCheckbox.checked = false;
+        return;
+    }
+    
+    const allChecked = Array.from(allCheckboxes).every(cb => cb.checked);
+    selectAllCheckbox.checked = allChecked;
+}
+
+function updateBulkActionsBar() {
+    const bar = document.getElementById('bulk-actions-bar');
+    const countSpan = document.getElementById('selected-count');
+    
+    // Check if elements exist (they might be removed after reload)
+    if (!bar || !countSpan) return;
+    
+    if (selectedDocuments.length > 0) {
+        bar.classList.remove('hidden');
+        countSpan.textContent = selectedDocuments.length;
+    } else {
+        bar.classList.add('hidden');
+    }
+}
+
+function clearSelection() {
+    selectedDocuments = [];
+    lastClickedToken = null;  // Reset shift-selection tracking
+    
+    const allCheckboxes = document.querySelectorAll('.doc-checkbox');
+    allCheckboxes.forEach(checkbox => {
+        checkbox.checked = false;
+        const token = checkbox.getAttribute('data-token');
+        const docCard = document.getElementById(`doc-${token}`);
+        if (docCard) {
+            docCard.classList.remove('border-blue-500', 'bg-gray-600');
+        }
+    });
+    
+    const selectAllCheckbox = document.getElementById('select-all-docs');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.checked = false;
+    }
+    
+    updateBulkActionsBar();
+}
+
+// ==========================================
+// BULK ACTIONS - Delete
+// ==========================================
+
+async function bulkDeleteDocuments() {
+    if (selectedDocuments.length === 0) {
+        alert('Aucun document sélectionné');
+        return;
+    }
+    
+    const count = selectedDocuments.length;
+    const confirmMsg = `⚠️ ATTENTION ⚠️\n\nVous êtes sur le point de supprimer ${count} document(s).\n\nCette action est IRRÉVERSIBLE.\n\nVoulez-vous continuer ?`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    // Show loading state
+    const bar = document.getElementById('bulk-actions-bar');
+    bar.innerHTML = `
+        <div class="flex items-center gap-3">
+            <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
+            <span class="text-white font-semibold">Suppression en cours...</span>
+        </div>
+    `;
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    // Delete documents one by one
+    for (const token of selectedDocuments) {
+        try {
+            const response = await fetch(`/api/admin/documents/${token}`, {
+                method: 'DELETE'
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                successCount++;
+            } else {
+                errorCount++;
+                console.error(`Failed to delete ${token}:`, data.error);
+            }
+        } catch (error) {
+            errorCount++;
+            console.error(`Error deleting ${token}:`, error);
+        }
+    }
+    
+    // Restore original bar content (since we replaced it with loading message)
+    bar.innerHTML = `
+        <div class="flex items-center gap-4">
+            <div class="text-white font-semibold flex items-center gap-2">
+                <i class="fas fa-check-circle"></i>
+                <span id="selected-count">0</span> document(s) sélectionné(s)
+            </div>
+            
+            <div class="h-8 w-px bg-white/30"></div>
+            
+            <div class="flex gap-2">
+                <button 
+                    onclick="bulkEditDocuments()"
+                    class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                    title="Modifier les documents sélectionnés"
+                >
+                    <i class="fas fa-edit"></i>
+                    Modifier
+                </button>
+                
+                <button 
+                    onclick="bulkMoveDocuments()"
+                    class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                    title="Déplacer vers un dossier"
+                >
+                    <i class="fas fa-folder"></i>
+                    Déplacer
+                </button>
+                
+                <button 
+                    onclick="bulkDeleteDocuments()"
+                    class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                    title="Supprimer les documents sélectionnés"
+                >
+                    <i class="fas fa-trash"></i>
+                    Supprimer
+                </button>
+                
+                <button 
+                    onclick="clearSelection()"
+                    class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition font-semibold"
+                    title="Annuler la sélection"
+                >
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // Clear selection (this will hide the bar via updateBulkActionsBar)
+    clearSelection();
+    
+    // Reload documents
+    await loadDocuments();
+    
+    // Show result
+    if (errorCount === 0) {
+        alert(`✅ ${successCount} document(s) supprimé(s) avec succès !`);
+    } else {
+        alert(`⚠️ Résultat:\n\n✅ ${successCount} document(s) supprimé(s)\n❌ ${errorCount} erreur(s)`);
+    }
+}
+
+// ==========================================
+// BULK ACTIONS - Edit (Tags & Folder)
+// ==========================================
+
+function bulkEditDocuments() {
+    if (selectedDocuments.length === 0) {
+        alert('Aucun document sélectionné');
+        return;
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'bulk-edit-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full border border-gray-700">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-edit text-yellow-400"></i>
+                        Modifier ${selectedDocuments.length} document(s)
+                    </h2>
+                    <button onclick="closeBulkEditModal()" class="text-gray-400 hover:text-white text-2xl">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <form id="bulk-edit-form" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">
+                            Tags à ajouter (optionnel)
+                        </label>
+                        <div class="flex gap-2 mb-2">
+                            <input 
+                                type="text" 
+                                id="bulk-tag-input" 
+                                class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
+                                placeholder="Ajouter un tag"
+                                onkeypress="if(event.key === 'Enter') { event.preventDefault(); addBulkTag(); }"
+                            />
+                            <button 
+                                type="button"
+                                onclick="addBulkTag()"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition"
+                            >
+                                <i class="fas fa-plus mr-1"></i> Ajouter
+                            </button>
+                        </div>
+                        <div id="bulk-tags-container" class="flex flex-wrap gap-2 min-h-[40px] p-3 bg-gray-700 rounded-lg border border-gray-600">
+                            <span class="text-gray-500 text-sm italic">Aucun tag à ajouter</span>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">
+                            Dossier (optionnel - laissez vide pour ne pas changer)
+                        </label>
+                        <input 
+                            type="text" 
+                            id="bulk-folder-input" 
+                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
+                            placeholder="Ex: Formation/Bancassurance"
+                        />
+                        <p class="text-gray-500 text-xs mt-1">💡 Utilisez "/" pour créer une hiérarchie</p>
+                    </div>
+                    
+                    <div class="flex gap-3 mt-6">
+                        <button 
+                            type="submit" 
+                            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition"
+                        >
+                            <i class="fas fa-save mr-2"></i>
+                            Appliquer les modifications
+                        </button>
+                        <button 
+                            type="button"
+                            onclick="closeBulkEditModal()"
+                            class="bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-6 rounded-lg transition"
+                        >
+                            Annuler
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Setup form submit
+    document.getElementById('bulk-edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await submitBulkEdit();
+    });
+}
+
+const bulkEditTags = [];
+
+function addBulkTag() {
+    const input = document.getElementById('bulk-tag-input');
+    const tag = input.value.trim();
+    
+    if (tag && !bulkEditTags.includes(tag)) {
+        bulkEditTags.push(tag);
+        renderBulkTags();
+        input.value = '';
+    }
+}
+
+function removeBulkTag(tag) {
+    const index = bulkEditTags.indexOf(tag);
+    if (index > -1) {
+        bulkEditTags.splice(index, 1);
+        renderBulkTags();
+    }
+}
+
+function renderBulkTags() {
+    const container = document.getElementById('bulk-tags-container');
+    
+    if (bulkEditTags.length === 0) {
+        container.innerHTML = '<span class="text-gray-500 text-sm italic">Aucun tag à ajouter</span>';
+    } else {
+        container.innerHTML = bulkEditTags.map(tag => `
+            <span class="inline-flex items-center gap-1 bg-blue-600 text-white text-sm px-3 py-1 rounded">
+                ${tag}
+                <button 
+                    type="button"
+                    onclick="removeBulkTag('${tag}')"
+                    class="hover:text-red-300 transition"
+                >
+                    <i class="fas fa-times"></i>
+                </button>
+            </span>
+        `).join('');
+    }
+}
+
+async function submitBulkEdit() {
+    const folderInput = document.getElementById('bulk-folder-input');
+    const folder = folderInput.value.trim();
+    
+    // Show loading
+    const modal = document.getElementById('bulk-edit-modal');
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full border border-gray-700 p-6">
+            <div class="flex items-center gap-3">
+                <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+                <span class="text-white font-semibold text-lg">Modification en cours...</span>
+            </div>
+        </div>
+    `;
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    // Update each document
+    for (const token of selectedDocuments) {
+        try {
+            // Get current document
+            const doc = allDocuments.find(d => d.token === token);
+            if (!doc) continue;
+            
+            // Parse current tags
+            const currentTags = parseTags(doc.tags);
+            
+            // Merge with new tags (avoid duplicates)
+            const updatedTags = [...new Set([...currentTags, ...bulkEditTags])];
+            
+            // Prepare update data
+            const updateData = {
+                description: doc.description || '',
+                tags: updatedTags  // Send as array, backend will stringify
+            };
+            
+            // Only update folder if provided
+            if (folder) {
+                updateData.folder = folder;
+            } else {
+                updateData.folder = doc.folder || '';
+            }
+            
+            console.log(`🔵 [BULK-EDIT] Updating ${token}:`, updateData);
+            
+            const response = await fetch(`/api/admin/documents/${token}/description`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updateData)
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                successCount++;
+            } else {
+                errorCount++;
+                console.error(`Failed to update ${token}:`, data.error);
+            }
+        } catch (error) {
+            errorCount++;
+            console.error(`Error updating ${token}:`, error);
+        }
+    }
+    
+    // Clear tags array
+    bulkEditTags.length = 0;
+    
+    // Close modal
+    closeBulkEditModal();
+    
+    // Clear selection
+    clearSelection();
+    
+    // Reload documents
+    await loadDocuments();
+    
+    // Show result
+    if (errorCount === 0) {
+        alert(`✅ ${successCount} document(s) modifié(s) avec succès !`);
+    } else {
+        alert(`⚠️ Résultat:\n\n✅ ${successCount} document(s) modifié(s)\n❌ ${errorCount} erreur(s)`);
+    }
+}
+
+function closeBulkEditModal() {
+    const modal = document.getElementById('bulk-edit-modal');
+    if (modal) {
+        modal.remove();
+    }
+    bulkEditTags.length = 0;
+}
+
+// ==========================================
+// BULK ACTIONS - Move to Folder
+// ==========================================
+
+function bulkMoveDocuments() {
+    if (selectedDocuments.length === 0) {
+        alert('Aucun document sélectionné');
+        return;
+    }
+    
+    // Get existing folders for suggestions
+    const folders = [...new Set(allDocuments
+        .map(doc => doc.folder || '')
+        .filter(f => f !== '')
+    )].sort();
+    
+    const modal = document.createElement('div');
+    modal.id = 'bulk-move-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full border border-gray-700">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-folder text-purple-400"></i>
+                        Déplacer ${selectedDocuments.length} document(s)
+                    </h2>
+                    <button onclick="closeBulkMoveModal()" class="text-gray-400 hover:text-white text-2xl">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <form id="bulk-move-form" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">
+                            Dossier de destination
+                        </label>
+                        <input 
+                            type="text" 
+                            id="bulk-move-folder" 
+                            list="folders-list"
+                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
+                            placeholder="Ex: Formation/Bancassurance"
+                            required
+                        />
+                        <datalist id="folders-list">
+                            ${folders.map(f => `<option value="${f}">`).join('')}
+                        </datalist>
+                        <p class="text-gray-500 text-xs mt-1">💡 Utilisez "/" pour créer une hiérarchie</p>
+                    </div>
+                    
+                    <div class="flex gap-3 mt-6">
+                        <button 
+                            type="submit" 
+                            class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-lg transition"
+                        >
+                            <i class="fas fa-arrow-right mr-2"></i>
+                            Déplacer
+                        </button>
+                        <button 
+                            type="button"
+                            onclick="closeBulkMoveModal()"
+                            class="bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-6 rounded-lg transition"
+                        >
+                            Annuler
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Setup form submit
+    document.getElementById('bulk-move-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await submitBulkMove();
+    });
+}
+
+async function submitBulkMove() {
+    const folderInput = document.getElementById('bulk-move-folder');
+    const folder = folderInput.value.trim();
+    
+    if (!folder) {
+        alert('Veuillez saisir un dossier de destination');
+        return;
+    }
+    
+    // Show loading
+    const modal = document.getElementById('bulk-move-modal');
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full border border-gray-700 p-6">
+            <div class="flex items-center gap-3">
+                <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+                <span class="text-white font-semibold text-lg">Déplacement en cours...</span>
+            </div>
+        </div>
+    `;
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    // Move each document
+    for (const token of selectedDocuments) {
+        try {
+            const doc = allDocuments.find(d => d.token === token);
+            if (!doc) continue;
+            
+            const updateData = {
+                description: doc.description || '',
+                tags: doc.tags || '[]',
+                folder: folder
+            };
+            
+            const response = await fetch(`/api/admin/documents/${token}/description`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updateData)
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                successCount++;
+            } else {
+                errorCount++;
+                console.error(`Failed to move ${token}:`, data.error);
+            }
+        } catch (error) {
+            errorCount++;
+            console.error(`Error moving ${token}:`, error);
+        }
+    }
+    
+    // Close modal
+    closeBulkMoveModal();
+    
+    // Clear selection
+    clearSelection();
+    
+    // Reload documents
+    await loadDocuments();
+    
+    // Show result
+    if (errorCount === 0) {
+        alert(`✅ ${successCount} document(s) déplacé(s) vers "${folder}" avec succès !`);
+    } else {
+        alert(`⚠️ Résultat:\n\n✅ ${successCount} document(s) déplacé(s)\n❌ ${errorCount} erreur(s)`);
+    }
+}
+
+function closeBulkMoveModal() {
+    const modal = document.getElementById('bulk-move-modal');
+    if (modal) {
+        modal.remove();
     }
 }
 
@@ -3465,11 +4386,12 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
         // Intelligent sampling strategy based on document size
         let textPagesToExtract, ocrPagesToExtract;
         
-        // BATCH MODE: Ultra-light extraction (1 page only, no OCR)
+        // BATCH MODE: Smart sampling - extract more pages if needed to get enough text
         if (batchMode) {
-            textPagesToExtract = 1;  // Only first page
-            ocrPagesToExtract = 0;   // NO OCR in batch mode
-            DEBUG.info('PDF-EXTRACT', '⚡ BATCH MODE: 1 page, no OCR');
+            // Start with 1 page, will sample more if text is insufficient
+            textPagesToExtract = Math.min(5, totalPages);  // Maximum 5 pages in batch mode
+            ocrPagesToExtract = 0;   // NO OCR in batch mode (too slow)
+            DEBUG.info('PDF-EXTRACT', `⚡ BATCH MODE: up to ${textPagesToExtract} pages, no OCR`);
         } else if (totalPages <= 5) {
             textPagesToExtract = totalPages;  // All pages
             ocrPagesToExtract = Math.min(3, totalPages);
@@ -3511,12 +4433,17 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
         let fullText = metaText;
         DEBUG.startTimer('PDF-EXTRACT-text');
         
+        // Minimum text threshold for batch mode (300 chars = ~50 words)
+        const minTextThreshold = batchMode ? 300 : 0;
+        let actualPagesExtracted = 0;
+        
         for (let i = 1; i <= textPagesToExtract; i++) {
             const pageStartTime = performance.now();
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
             const pageText = textContent.items.map(item => item.str).join(' ');
             fullText += `[Page ${i}/${totalPages}]\n${pageText}\n\n`;
+            actualPagesExtracted = i;
             
             const pageDuration = performance.now() - pageStartTime;
             DEBUG.debug('PDF-EXTRACT', `Page ${i} text extracted in ${Math.round(pageDuration)}ms (${pageText.length} chars)`);
@@ -3524,9 +4451,15 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
             if (progressCallback) {
                 progressCallback(`Extraction page ${i}/${textPagesToExtract}...`, 10 + (i / textPagesToExtract) * 30);
             }
+            
+            // In batch mode, stop early if we have enough text
+            if (batchMode && fullText.length >= minTextThreshold) {
+                DEBUG.info('PDF-EXTRACT', `✅ Sufficient text found after ${i} pages (${fullText.length} chars)`);
+                break;
+            }
         }
         DEBUG.endTimer('PDF-EXTRACT-text');
-        DEBUG.info('PDF-EXTRACT', `Total text extracted: ${fullText.length} characters`);
+        DEBUG.info('PDF-EXTRACT', `Total text extracted: ${fullText.length} characters from ${actualPagesExtracted} pages`);
 
         // Capture first page as image
         DEBUG.startTimer('PDF-EXTRACT-image');
@@ -3644,7 +4577,7 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
             imageBase64,
             isScanned,
             totalPages,
-            sampledPages: isScanned ? ocrPagesToExtract : textPagesToExtract
+            sampledPages: isScanned && !batchMode ? ocrPagesToExtract : actualPagesExtracted
         };
     } catch (error) {
         const totalDuration = performance.now() - extractStartTime;
@@ -3659,26 +4592,57 @@ async function extractPDFContent(file, progressCallback = null, batchMode = fals
  * Call AI analysis API
  */
 async function analyzeWithAI(text, imageBase64, isScanned = false, totalPages = null, sampledPages = null) {
+    console.log('🤖 [AI-API] Calling /api/admin/analyze-pdf with:', {
+        textLength: text?.length || 0,
+        hasImage: !!imageBase64,
+        imageSize: imageBase64 ? Math.round(imageBase64.length / 1024) + ' KB' : 'N/A',
+        isScanned,
+        totalPages,
+        sampledPages
+    });
+    
     try {
+        const requestBody = { text, imageBase64, isScanned, totalPages, sampledPages };
+        
         const response = await fetch('/api/admin/analyze-pdf', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, imageBase64, isScanned, totalPages, sampledPages })
+            body: JSON.stringify(requestBody)
         });
         
-        const data = await response.json();
+        console.log('🤖 [AI-API] Response status:', response.status, response.statusText);
         
-        if (!data.success) {
-            alert(`Erreur : ${data.error}`);
-            return null;
+        // Try to parse response even if status is not ok
+        let data;
+        try {
+            data = await response.json();
+            console.log('🤖 [AI-API] Response data:', data);
+        } catch (parseError) {
+            console.error('❌ [AI-API] Failed to parse JSON response:', parseError);
+            throw new Error(`API returned non-JSON response (status ${response.status})`);
         }
         
+        if (!response.ok) {
+            const errorMsg = data.error || `HTTP ${response.status}: ${response.statusText}`;
+            console.error('❌ [AI-API] API returned error:', errorMsg);
+            throw new Error(`API Error: ${errorMsg}`);
+        }
+        
+        if (!data.success) {
+            console.error('❌ [AI-API] Analysis failed:', data.error);
+            throw new Error(`AI Analysis failed: ${data.error}`);
+        }
+        
+        console.log('✅ [AI-API] Analysis successful, suggestions:', data.suggestions);
         return data.suggestions;
         
     } catch (error) {
-        console.error('AI Analysis Error:', error);
-        alert('Erreur lors de l\'analyse IA');
-        return null;
+        console.error('❌ [AI-API] Exception during API call:', {
+            message: error.message,
+            stack: error.stack,
+            error
+        });
+        throw error; // Re-throw to be caught by caller
     }
 }
 
@@ -3845,12 +4809,362 @@ async function analyzeConvertedFile() {
 /**
  * Re-analyze document in edit modal
  */
+/**
+ * Open convert modal for a specific document
+ */
+async function openConvertModal(token, filename) {
+    const doc = allDocuments.find(d => d.token === token);
+    
+    if (!doc) {
+        alert('❌ Document introuvable');
+        return;
+    }
+    
+    console.log('🔄 [CONVERT-MODAL] Opening conversion modal for:', {
+        token,
+        filename,
+        size: doc.size
+    });
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.id = 'convert-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-3xl w-full border border-gray-700 max-h-[90vh] overflow-y-auto">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-cog text-orange-400"></i>
+                        Convertir : ${filename}
+                    </h2>
+                    <button onclick="closeConvertModal()" class="text-gray-400 hover:text-white text-2xl">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <form id="convert-modal-form" class="space-y-6">
+                    <!-- Page Format Options -->
+                    <div class="bg-gray-700 p-4 rounded-lg border-2 border-purple-500">
+                        <label class="block mb-3">
+                            <span class="text-white font-semibold flex items-center gap-2">
+                                <i class="fas fa-columns text-purple-400"></i>
+                                Format des pages
+                            </span>
+                        </label>
+                        <div class="space-y-3">
+                            <label class="flex items-start gap-3 bg-gray-600 p-3 rounded cursor-pointer hover:bg-gray-550 transition">
+                                <input type="radio" name="modal-page-format" value="single" checked class="mt-1" onchange="toggleModalSplitOptions()" />
+                                <div>
+                                    <p class="text-white font-semibold">📄 Pages simples (défaut)</p>
+                                    <p class="text-gray-400 text-xs">Chaque page PDF = 1 page (format portrait ou paysage standard)</p>
+                                </div>
+                            </label>
+                            
+                            <label class="flex items-start gap-3 bg-gray-600 p-3 rounded cursor-pointer hover:bg-gray-550 transition">
+                                <input type="radio" name="modal-page-format" value="double" class="mt-1" onchange="toggleModalSplitOptions()" />
+                                <div class="flex-1">
+                                    <p class="text-white font-semibold">📖 Pages doubles (à spliter)</p>
+                                    <p class="text-gray-400 text-xs mb-2">Chaque page PDF contient 2 pages côte à côte (livret/magazine)</p>
+                                    
+                                    <div id="modal-split-suboptions" class="hidden mt-2 pl-6 border-l-2 border-purple-400">
+                                        <label class="flex items-start gap-2 cursor-pointer">
+                                            <input type="checkbox" id="modal-remove-first-left" class="mt-1" />
+                                            <div>
+                                                <p class="text-white text-sm">✂️ Supprimer la partie gauche de la 1ère page</p>
+                                                <p class="text-gray-400 text-xs">Utile si la couverture a une page vide à gauche</p>
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <!-- Skip First Page Option -->
+                    <label class="flex items-start gap-3 bg-gray-700 p-4 rounded-lg cursor-pointer hover:bg-gray-600 transition">
+                        <input type="checkbox" id="modal-skip-first-page" class="mt-1" />
+                        <div>
+                            <p class="text-white font-semibold">Ignorer la première page</p>
+                            <p class="text-gray-400 text-sm">Utile si la première page est blanche ou une page de garde</p>
+                        </div>
+                    </label>
+                    
+                    <!-- Quality Selector -->
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">
+                            <i class="fas fa-sliders-h mr-2"></i>
+                            Qualité de compression
+                        </label>
+                        <select 
+                            id="modal-quality-select"
+                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="0.5">Standard (0.5) - Fichier plus léger</option>
+                            <option value="0.7" selected>Moyenne (0.7) - Équilibre recommandé</option>
+                            <option value="0.9">Élevée (0.9) - Meilleure qualité</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Progress Section (hidden by default) -->
+                    <div id="modal-conversion-progress" class="hidden bg-blue-900 border border-blue-700 rounded-lg p-4">
+                        <div class="flex items-center gap-3">
+                            <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+                            <div class="flex-1">
+                                <p class="text-white font-semibold" id="modal-progress-text">Préparation...</p>
+                                <div class="w-full bg-gray-700 rounded-full h-2 mt-2">
+                                    <div id="modal-progress-bar" class="bg-blue-500 h-2 rounded-full transition-all" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="flex gap-3">
+                        <button 
+                            type="submit"
+                            class="flex-1 bg-orange-600 hover:bg-orange-700 text-white font-semibold py-3 px-6 rounded-lg transition"
+                            id="modal-convert-btn"
+                        >
+                            <i class="fas fa-cog mr-2"></i>
+                            Convertir et Remplacer
+                        </button>
+                        <button 
+                            type="button"
+                            onclick="closeConvertModal()"
+                            class="bg-gray-600 hover:bg-gray-500 text-white px-6 py-3 rounded-lg transition"
+                        >
+                            <i class="fas fa-times mr-2"></i>
+                            Annuler
+                        </button>
+                    </div>
+                    
+                    <!-- Warning -->
+                    <div class="bg-yellow-900 border border-yellow-700 rounded-lg p-4">
+                        <p class="text-yellow-200 text-sm flex items-start gap-2">
+                            <i class="fas fa-exclamation-triangle mt-1"></i>
+                            <span><strong>Attention :</strong> Cette action remplacera le fichier original. Cette opération est irréversible.</span>
+                        </p>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Store token in modal for later use
+    modal.dataset.token = token;
+    modal.dataset.filename = filename;
+    
+    // Setup form submit
+    document.getElementById('convert-modal-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await handleConvertModalSubmit(token, filename);
+    });
+}
+
+function toggleModalSplitOptions() {
+    const pageFormat = document.querySelector('input[name="modal-page-format"]:checked')?.value;
+    const suboptions = document.getElementById('modal-split-suboptions');
+    
+    if (pageFormat === 'double') {
+        suboptions.classList.remove('hidden');
+    } else {
+        suboptions.classList.add('hidden');
+    }
+}
+
+function closeConvertModal() {
+    const modal = document.getElementById('convert-modal');
+    if (modal) modal.remove();
+}
+
+async function handleConvertModalSubmit(token, filename) {
+    console.log('🔄 [CONVERT-SUBMIT] Starting conversion for:', { token, filename });
+    
+    const progressDiv = document.getElementById('modal-conversion-progress');
+    const progressText = document.getElementById('modal-progress-text');
+    const progressBar = document.getElementById('modal-progress-bar');
+    const convertBtn = document.getElementById('modal-convert-btn');
+    
+    // Get options
+    const pageFormat = document.querySelector('input[name="modal-page-format"]:checked')?.value || 'single';
+    const removeFirstLeft = document.getElementById('modal-remove-first-left')?.checked || false;
+    const skipFirstPage = document.getElementById('modal-skip-first-page').checked;
+    const quality = parseFloat(document.getElementById('modal-quality-select').value);
+    
+    console.log('🔄 [CONVERT-SUBMIT] Options:', { pageFormat, removeFirstLeft, skipFirstPage, quality });
+    
+    // Show progress, disable button
+    progressDiv.classList.remove('hidden');
+    convertBtn.disabled = true;
+    convertBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Conversion en cours...';
+    
+    try {
+        // STEP 1: Download PDF from server
+        progressText.textContent = '📥 Téléchargement du document...';
+        progressBar.style.width = '10%';
+        
+        console.log('🔄 [CONVERT-SUBMIT] Fetching document from /api/documents/' + token);
+        const pdfResponse = await fetch(`/api/documents/${token}`);
+        
+        if (!pdfResponse.ok) {
+            throw new Error(`Failed to download PDF: ${pdfResponse.status}`);
+        }
+        
+        const pdfBlob = await pdfResponse.blob();
+        console.log('🔄 [CONVERT-SUBMIT] Downloaded PDF:', {
+            size: pdfBlob.size,
+            type: pdfBlob.type
+        });
+        
+        const file = new File([pdfBlob], filename, { type: 'application/pdf' });
+        const originalFileSize = file.size;
+        
+        progressText.textContent = '🗜️ Préparation du PDF...';
+        progressBar.style.width = '20%';
+        
+        // STEP 2: Compress if needed
+        let processedFile = file;
+        if (shouldCompressPDF(file)) {
+            progressText.textContent = '🗜️ Compression en cours...';
+            console.log('🔄 [CONVERT-SUBMIT] Starting compression');
+            
+            const { compressedFile } = await compressPDF(file, (message, percent) => {
+                progressText.textContent = message;
+                progressBar.style.width = `${20 + (percent * 0.2)}%`; // 20-40%
+            });
+            
+            processedFile = compressedFile;
+            console.log('🔄 [CONVERT-SUBMIT] Compression completed');
+        }
+        
+        // STEP 3: Read PDF with pdf.js
+        progressText.textContent = '📄 Lecture du PDF...';
+        progressBar.style.width = '40%';
+        
+        const arrayBuffer = await processedFile.arrayBuffer();
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const sourcePdf = await loadingTask.promise;
+        
+        console.log('🔄 [CONVERT-SUBMIT] PDF loaded, pages:', sourcePdf.numPages);
+        
+        // STEP 4: Split/convert pages
+        progressText.textContent = '🔄 Conversion en cours...';
+        progressBar.style.width = '50%';
+        
+        const { pdfDoc: newPdfDoc, stats } = await splitPDFPages(sourcePdf, {
+            pageFormat: pageFormat,
+            removeFirstLeft: removeFirstLeft,
+            skipFirstPage: skipFirstPage,
+            quality: quality,
+            progressCallback: (progress, currentPage, total) => {
+                progressText.textContent = `🔄 Conversion... ${progress}% (page ${currentPage}/${total})`;
+                progressBar.style.width = `${50 + (progress * 0.3)}%`; // 50-80%
+            }
+        });
+        
+        console.log('🔄 [CONVERT-SUBMIT] Conversion completed, stats:', stats);
+        
+        // STEP 5: Save PDF
+        progressText.textContent = '💾 Génération du fichier final...';
+        progressBar.style.width = '80%';
+        
+        const pdfBytes = await newPdfDoc.save();
+        const convertedBlob = new Blob([pdfBytes], { type: 'application/pdf' });
+        
+        const fileSizeMB = (pdfBytes.length / 1024 / 1024).toFixed(2);
+        const originalSizeMB = (originalFileSize / 1024 / 1024).toFixed(2);
+        const compressionRatio = ((1 - pdfBytes.length / originalFileSize) * 100).toFixed(1);
+        
+        console.log('🔄 [CONVERT-SUBMIT] PDF generated:', {
+            originalSize: originalSizeMB + ' MB',
+            finalSize: fileSizeMB + ' MB',
+            compression: compressionRatio + '%',
+            outputPages: stats.outputPages
+        });
+        
+        // STEP 6: Upload and replace original file
+        progressText.textContent = '📤 Remplacement du fichier original...';
+        progressBar.style.width = '90%';
+        
+        const formData = new FormData();
+        formData.append('file', convertedBlob, filename);
+        
+        console.log('🔄 [CONVERT-SUBMIT] Uploading to /api/admin/documents/' + token + '/file');
+        const uploadResponse = await fetch(`/api/admin/documents/${token}/file`, {
+            method: 'PUT',
+            body: formData
+        });
+        
+        const uploadData = await uploadResponse.json();
+        
+        if (!uploadResponse.ok || !uploadData.success) {
+            throw new Error(uploadData.error || 'File replacement failed');
+        }
+        
+        console.log('✅ [CONVERT-SUBMIT] File replaced successfully');
+        
+        // STEP 7: Success
+        progressText.textContent = '✅ Conversion terminée !';
+        progressBar.style.width = '100%';
+        
+        // Show success message
+        const pageText = pageFormat === 'single' 
+            ? `${stats.outputPages} pages conservées`
+            : `${stats.outputPages} pages créées`;
+        
+        alert(`✅ Conversion réussie !\n\n` +
+              `📄 ${pageText}\n` +
+              `📊 Taille: ${originalSizeMB} MB → ${fileSizeMB} MB (${compressionRatio}% compression)\n\n` +
+              `Le fichier original a été remplacé.`);
+        
+        // Close modal
+        closeConvertModal();
+        
+        // Reload documents to show updated size
+        await loadDocuments();
+        
+    } catch (error) {
+        console.error('❌ [CONVERT-SUBMIT] Conversion error:', {
+            message: error.message,
+            stack: error.stack,
+            error
+        });
+        
+        progressText.textContent = '❌ Erreur lors de la conversion';
+        progressBar.style.width = '0%';
+        progressBar.classList.add('bg-red-500');
+        
+        alert(`❌ Erreur lors de la conversion\n\n${error.message}`);
+        
+        convertBtn.disabled = false;
+        convertBtn.innerHTML = '<i class="fas fa-cog mr-2"></i> Réessayer';
+    }
+}
+
 async function reanalyzeDocument(token) {
     const doc = allDocuments.find(d => d.token === token);
     
-    if (!confirm(`⚠️ Cette analyse consommera des crédits API.\n\nAnalyser "${doc.filename}" ?`)) {
+    console.log('🤖 [REANALYZE] Starting analysis for:', {
+        token,
+        filename: doc?.filename,
+        docFound: !!doc
+    });
+    
+    if (!doc) {
+        alert('❌ Document introuvable');
         return;
     }
+    
+    if (!confirm(`⚠️ Cette analyse consommera des crédits API.\n\nAnalyser "${doc.filename}" ?`)) {
+        console.log('🤖 [REANALYZE] User cancelled analysis');
+        return;
+    }
+    
+    // Open edit modal FIRST so user can see the document being analyzed
+    openEditModal(token);
     
     const button = event.target;
     const originalText = button.innerHTML;
@@ -3859,14 +5173,25 @@ async function reanalyzeDocument(token) {
     // Progress callback
     const updateProgress = (message, percent) => {
         button.innerHTML = `<i class="fas fa-spinner fa-spin mr-2"></i>${message}`;
+        console.log(`🤖 [REANALYZE] Progress: ${message} (${percent}%)`);
     };
     
     try {
         updateProgress('Téléchargement...', 0);
         
         // Download PDF from server
+        console.log('🤖 [REANALYZE] Fetching document from /api/documents/' + token);
         const pdfResponse = await fetch(`/api/documents/${token}`);
+        
+        if (!pdfResponse.ok) {
+            throw new Error(`Failed to download PDF: ${pdfResponse.status} ${pdfResponse.statusText}`);
+        }
+        
         const pdfBlob = await pdfResponse.blob();
+        console.log('🤖 [REANALYZE] Downloaded PDF:', {
+            size: pdfBlob.size,
+            type: pdfBlob.type
+        });
         
         // Create file from blob
         const file = new File([pdfBlob], doc.filename, { type: 'application/pdf' });
@@ -3874,24 +5199,59 @@ async function reanalyzeDocument(token) {
         updateProgress('Analyse en cours...', 10);
         
         // Extract and analyze
+        console.log('🤖 [REANALYZE] Extracting PDF content...');
         const { text, imageBase64, isScanned, totalPages, sampledPages } = await extractPDFContent(file, updateProgress);
         
+        console.log('🤖 [REANALYZE] Extracted content:', {
+            textLength: text?.length || 0,
+            hasImage: !!imageBase64,
+            isScanned,
+            totalPages,
+            sampledPages
+        });
+        
         if (isScanned && text.length < 50) {
+            console.warn('🤖 [REANALYZE] OCR extracted very little text');
             alert('⚠️ OCR n\'a pas pu extraire assez de texte. L\'IA utilisera uniquement l\'image.');
         }
         
         updateProgress('Envoi à l\'IA...', 95);
+        console.log('🤖 [REANALYZE] Calling AI analysis...');
         const suggestions = await analyzeWithAI(text, imageBase64, isScanned, totalPages, sampledPages);
         
+        console.log('🤖 [REANALYZE] AI response:', suggestions);
+        
         if (suggestions) {
+            console.log('🤖 [REANALYZE] Applying suggestions to edit modal');
             applySuggestions(suggestions, 'edit');
+        } else {
+            alert('⚠️ L\'IA n\'a pas retourné de suggestions');
         }
     } catch (error) {
-        console.error('Analysis error:', error);
-        alert('❌ Erreur lors de l\'analyse du document');
+        console.error('❌ [REANALYZE] Analysis error:', {
+            message: error.message,
+            stack: error.stack,
+            error
+        });
+        
+        // Show detailed error to user
+        let errorMessage = '❌ Erreur lors de l\'analyse du document\n\n';
+        
+        if (error.message.includes('API')) {
+            errorMessage += 'Erreur API : ' + error.message + '\n\n';
+            errorMessage += '💡 Vérifiez que :\n';
+            errorMessage += '- L\'IA est activée dans Sécurité > Configuration IA\n';
+            errorMessage += '- La clé API Gemini est configurée\n';
+            errorMessage += '- Vous avez des crédits API disponibles';
+        } else {
+            errorMessage += 'Détails : ' + error.message;
+        }
+        
+        alert(errorMessage);
     } finally {
         button.disabled = false;
         button.innerHTML = originalText;
+        console.log('🤖 [REANALYZE] Analysis completed (or failed)');
     }
 }
 
@@ -3987,6 +5347,46 @@ function closeBatchAnalyze() {
     if (modal) modal.remove();
 }
 
+/**
+ * Confirm cancellation of batch analyze (warns about wasted AI credits)
+ */
+function confirmCancelBatchAnalyze(totalAnalyzed) {
+    DEBUG.group('⚠️ CANCEL BATCH ANALYZE');
+    
+    // Recalculate applied count dynamically at click time
+    const appliedButtons = document.querySelectorAll('[id^="batch-result-"] button.bg-green-600');
+    const appliedCount = appliedButtons.length;
+    const remainingCount = totalAnalyzed - appliedCount;
+    
+    DEBUG.info('CANCEL', `Total analyzed: ${totalAnalyzed}, Applied: ${appliedCount}, Remaining: ${remainingCount}`);
+    DEBUG.info('CANCEL', `Found ${appliedButtons.length} green buttons:`, Array.from(appliedButtons).map(btn => btn.parentElement.id));
+    
+    // Build confirmation message
+    let message = '⚠️ Attention : Des crédits IA ont été utilisés pour cette analyse.\n\n';
+    
+    if (appliedCount > 0) {
+        message += `✅ ${appliedCount} suggestion(s) déjà appliquée(s) (conservée(s))\n`;
+    }
+    
+    if (remainingCount > 0) {
+        message += `❌ ${remainingCount} suggestion(s) non appliquée(s) (perdues)\n`;
+    }
+    
+    message += '\nVoulez-vous vraiment annuler et fermer la modale ?\n';
+    message += 'Les suggestions non appliquées seront perdues.';
+    
+    const confirmed = confirm(message);
+    
+    if (confirmed) {
+        DEBUG.info('CANCEL', 'User confirmed cancellation');
+        DEBUG.groupEnd();
+        closeBatchAnalyze();
+    } else {
+        DEBUG.info('CANCEL', 'User cancelled the cancellation (stayed in modal)');
+        DEBUG.groupEnd();
+    }
+}
+
 async function loadBatchDocuments() {
     const listDiv = document.getElementById('batch-documents-list');
     listDiv.innerHTML = '<div class="text-center py-4"><div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white mx-auto"></div></div>';
@@ -3996,7 +5396,11 @@ async function loadBatchDocuments() {
         const data = await response.json();
         
         if (data.success && data.documents.length > 0) {
-            listDiv.innerHTML = data.documents.map(doc => `
+            listDiv.innerHTML = data.documents.map(doc => {
+                // Parse tags using helper function
+                const tagsArray = parseTags(doc.tags);
+                
+                return `
                 <label class="flex items-center gap-3 p-3 bg-gray-800 rounded hover:bg-gray-750 cursor-pointer">
                     <input type="checkbox" class="batch-doc-checkbox w-4 h-4" value="${doc.token}" data-filename="${doc.filename}">
                     <div class="flex-1 min-w-0">
@@ -4004,13 +5408,14 @@ async function loadBatchDocuments() {
                         <p class="text-xs text-gray-400 truncate">${doc.description || 'Pas de description'}</p>
                     </div>
                     <div class="flex flex-wrap gap-1">
-                        ${(doc.tags || []).slice(0, 2).map(tag => `
+                        ${tagsArray.slice(0, 2).map(tag => `
                             <span class="px-2 py-1 bg-blue-600 text-white text-xs rounded">${tag}</span>
                         `).join('')}
-                        ${(doc.tags || []).length > 2 ? `<span class="text-xs text-gray-400">+${(doc.tags || []).length - 2}</span>` : ''}
+                        ${tagsArray.length > 2 ? `<span class="text-xs text-gray-400">+${tagsArray.length - 2}</span>` : ''}
                     </div>
                 </label>
-            `).join('');
+                `;
+            }).join('');
             
             // Add change listeners
             document.querySelectorAll('.batch-doc-checkbox').forEach(cb => {
@@ -4065,6 +5470,28 @@ function toggleUploadSplitOptions() {
     }
 }
 
+/**
+ * Toggle the "Ajouter un Document" accordion in the library view
+ */
+function toggleUploadAccordion() {
+    const content = document.getElementById('upload-accordion-content');
+    const icon = document.getElementById('upload-accordion-icon');
+    
+    if (content && icon) {
+        const isHidden = content.classList.contains('hidden');
+        
+        if (isHidden) {
+            // Open accordion
+            content.classList.remove('hidden');
+            icon.classList.add('rotate-180');
+        } else {
+            // Close accordion
+            content.classList.add('hidden');
+            icon.classList.remove('rotate-180');
+        }
+    }
+}
+
 async function startBatchAnalyze() {
     DEBUG.group('🤖 BATCH ANALYZE');
     const batchStartTime = performance.now();
@@ -4108,7 +5535,7 @@ async function startBatchAnalyze() {
             document.getElementById('batch-status').textContent = `📥 Téléchargement ${filename}...`;
             DEBUG.startTimer(`BATCH-download-${i}`);
             const downloadStartTime = performance.now();
-            const pdfResponse = await fetch(`/view?doc=${token}&download=1`);
+            const pdfResponse = await fetch(`/api/documents/${token}`);
             const pdfBlob = await pdfResponse.blob();
             const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
             DEBUG.endTimer(`BATCH-download-${i}`);
@@ -4151,6 +5578,35 @@ async function startBatchAnalyze() {
             totalTextLength: documentsToAnalyze.reduce((sum, doc) => sum + doc.text.length, 0)
         });
         
+        // Estimate AI processing time: ~8-10 seconds per document
+        const estimatedAIDuration = documentsToAnalyze.length * 10000; // 10s per doc
+        
+        // Start simulated progress bar (40% to 95% over estimated duration)
+        let currentProgress = 40;
+        let statusMessageIndex = 0;
+        const statusMessages = [
+            '🤖 Analyse IA en cours...',
+            '📊 Analyse du contenu...',
+            '🏷️ Génération des tags...',
+            '📁 Suggestion de dossier...',
+            '✍️ Rédaction description...',
+            '🔍 Finalisation analyse...'
+        ];
+        
+        const progressInterval = setInterval(() => {
+            currentProgress += 1;
+            if (currentProgress <= 95) {
+                document.getElementById('batch-progress-bar').style.width = `${currentProgress}%`;
+                document.getElementById('batch-progress-text').textContent = `${currentProgress}%`;
+                
+                // Update status message every ~15% progress
+                if (currentProgress % 10 === 0 && statusMessageIndex < statusMessages.length - 1) {
+                    statusMessageIndex++;
+                    document.getElementById('batch-status').textContent = statusMessages[statusMessageIndex];
+                }
+            }
+        }, estimatedAIDuration / 55); // Spread 55% progress over estimated time
+        
         DEBUG.startTimer('BATCH-ANALYZE-ai-phase');
         const aiStartTime = performance.now();
         const response = await fetch('/api/admin/batch-analyze', {
@@ -4160,6 +5616,10 @@ async function startBatchAnalyze() {
         });
         
         const result = await response.json();
+        
+        // Stop simulated progress
+        clearInterval(progressInterval);
+        
         DEBUG.endTimer('BATCH-ANALYZE-ai-phase');
         const aiDuration = performance.now() - aiStartTime;
         DEBUG.perf('BATCH-ANALYZE', 'AI analysis phase', Math.round(aiDuration));
@@ -4173,18 +5633,66 @@ async function startBatchAnalyze() {
             document.getElementById('batch-progress-text').textContent = `${result.analyzed} / ${result.total}`;
             document.getElementById('batch-progress-bar').style.width = '100%';
             
-            // Show results
-            detailsDiv.innerHTML = '<div class="mt-2 pt-2 border-t border-gray-600"></div>';
-            result.results.forEach(res => {
+            // Show results with apply buttons
+            detailsDiv.innerHTML = `
+                <div class="mt-4 pt-4 border-t border-gray-600">
+                    <p class="text-white font-semibold mb-3">
+                        <i class="fas fa-check-circle text-green-400 mr-2"></i>
+                        Analyse terminée ! ${result.analyzed} succès, ${result.failed} échecs
+                    </p>
+                </div>
+            `;
+            
+            result.results.forEach((res, index) => {
                 DEBUG.debug('BATCH-ANALYZE', `Success: ${res.filename}`, res.suggestions);
-                detailsDiv.innerHTML += `<div class="text-sm text-green-400"><i class="fas fa-check-circle mr-2"></i>Analysé: ${res.filename}</div>`;
-            });
-            result.errors.forEach(err => {
-                DEBUG.error('BATCH-ANALYZE', `Failed: ${err.filename}`, err.error);
-                detailsDiv.innerHTML += `<div class="text-sm text-red-400"><i class="fas fa-times-circle mr-2"></i>Erreur: ${err.filename} - ${err.error}</div>`;
+                
+                const resultId = `batch-result-${index}`;
+                
+                // Extract suggestions from nested structure
+                const suggestions = res.suggestions || {};
+                
+                detailsDiv.innerHTML += `
+                    <div class="bg-gray-800 rounded-lg p-4 mb-3" id="${resultId}" data-suggestions='${JSON.stringify(res).replace(/'/g, "&#39;")}'>
+                        <div class="flex items-start justify-between gap-3 mb-2">
+                            <div class="flex-1">
+                                <p class="text-white font-medium text-sm mb-1">
+                                    <span class="text-gray-400">Original:</span> ${res.filename}
+                                </p>
+                                <p class="text-blue-300 font-medium mb-2">
+                                    <i class="fas fa-arrow-right mr-2"></i>${suggestions.filename || res.filename}
+                                </p>
+                                <p class="text-sm text-gray-400 mt-1">${suggestions.description?.substring(0, 100) || 'Pas de description'}...</p>
+                            </div>
+                            <button 
+                                onclick="applyBatchSuggestions('${resultId}')"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm whitespace-nowrap transition"
+                            >
+                                <i class="fas fa-magic mr-2"></i>Appliquer
+                            </button>
+                        </div>
+                        <div class="flex flex-wrap gap-2 mt-2">
+                            ${suggestions.tags?.slice(0, 3).map(tag => 
+                                `<span class="px-2 py-1 bg-blue-900 text-blue-200 text-xs rounded">${tag}</span>`
+                            ).join('') || '<span class="text-sm text-gray-500">Pas de tags</span>'}
+                            ${suggestions.folder ? `<span class="px-2 py-1 bg-purple-900 text-purple-200 text-xs rounded"><i class="fas fa-folder mr-1"></i>${suggestions.folder}</span>` : ''}
+                        </div>
+                    </div>
+                `;
             });
             
-            // Reload documents
+            result.errors.forEach(err => {
+                DEBUG.error('BATCH-ANALYZE', `Failed: ${err.filename}`, err.error);
+                detailsDiv.innerHTML += `
+                    <div class="bg-red-900/20 border border-red-700 rounded-lg p-3 mb-2">
+                        <p class="text-sm text-red-400">
+                            <i class="fas fa-times-circle mr-2"></i>
+                            <strong>${err.filename}</strong>: ${err.error}
+                        </p>
+                    </div>
+                `;
+            });
+            
+            // Reload documents list
             await loadDocuments();
             
             const totalDuration = performance.now() - batchStartTime;
@@ -4192,14 +5700,37 @@ async function startBatchAnalyze() {
             DEBUG.success('BATCH-ANALYZE', `Batch analysis completed in ${Math.round(totalDuration)}ms`);
             DEBUG.groupEnd();
             
-            setTimeout(() => {
-                alert(`✅ Analyse terminée !\n\n✅ ${result.analyzed} documents analysés\n❌ ${result.failed} échecs`);
-                closeBatchAnalyze();
-            }, 2000);
+            // Add "Annuler" and "Fermer" buttons
+            const buttonContainer = button.parentElement;
+            
+            // Replace single button with two buttons
+            // Note: appliedCount will be calculated dynamically when "Annuler" is clicked
+            buttonContainer.innerHTML = `
+                <div class="flex gap-3 justify-end">
+                    <button 
+                        id="batch-cancel-btn"
+                        class="bg-gray-600 hover:bg-gray-700 text-white px-6 py-2 rounded transition"
+                        onclick="confirmCancelBatchAnalyze(${result.analyzed})"
+                    >
+                        <i class="fas fa-times mr-2"></i>Annuler
+                    </button>
+                    <button 
+                        id="batch-close-btn"
+                        class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded transition"
+                        onclick="closeBatchAnalyze()"
+                    >
+                        <i class="fas fa-check mr-2"></i>Fermer
+                    </button>
+                </div>
+            `;
         } else {
             DEBUG.error('BATCH-ANALYZE', 'Batch analysis failed', result.error);
             DEBUG.groupEnd();
             alert('Erreur: ' + result.error);
+            
+            // Reset button on full failure
+            button.disabled = false;
+            button.innerHTML = '<i class="fas fa-play mr-2"></i>Lancer l\'analyse';
         }
     } catch (error) {
         const totalDuration = performance.now() - batchStartTime;
@@ -4207,8 +5738,80 @@ async function startBatchAnalyze() {
         DEBUG.groupEnd();
         console.error('Batch analyze error:', error);
         alert('❌ Erreur lors de l\'analyse par lot');
-    } finally {
+        
+        // Reset button on exception
         button.disabled = false;
         button.innerHTML = '<i class="fas fa-play mr-2"></i>Lancer l\'analyse';
+    }
+}
+
+/**
+ * Apply AI suggestions from batch analyze to a specific document
+ */
+async function applyBatchSuggestions(resultId) {
+    DEBUG.group(`🔧 APPLY SUGGESTIONS: ${resultId}`);
+    
+    try {
+        // Get suggestions from data attribute
+        const resultDiv = document.getElementById(resultId);
+        const data = JSON.parse(resultDiv.dataset.suggestions);
+        
+        // Extract suggestions from nested structure
+        // API returns: { success, filename, documentId, suggestions: { filename, description, tags, folder } }
+        const suggestions = data.suggestions || data;
+        
+        DEBUG.info('APPLY-SUGGESTIONS', 'Applying suggestions', {
+            documentId: data.documentId,
+            originalFilename: data.filename,
+            newFilename: suggestions.filename,
+            description: suggestions.description,
+            tags: suggestions.tags,
+            folder: suggestions.folder
+        });
+        
+        const response = await fetch(`/api/admin/documents/${data.documentId}/description`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                filename: suggestions.filename,
+                description: suggestions.description,
+                tags: suggestions.tags,
+                folder: suggestions.folder
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            DEBUG.success('APPLY-SUGGESTIONS', 'Suggestions applied successfully');
+            
+            // Visual feedback - mark button as applied
+            const button = resultDiv.querySelector('button');
+            button.classList.remove('bg-blue-600', 'hover:bg-blue-700');
+            button.classList.add('bg-green-600', 'cursor-not-allowed');
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-check mr-2"></i>Appliqué';
+            
+            // Debug: Verify button state after modification
+            DEBUG.info('APPLY-SUGGESTIONS', 'Button updated', {
+                buttonId: button.parentElement.id,
+                hasGreenClass: button.classList.contains('bg-green-600'),
+                classList: Array.from(button.classList)
+            });
+            
+            // Reload documents to show updated metadata
+            await loadDocuments();
+            
+            DEBUG.groupEnd();
+        } else {
+            DEBUG.error('APPLY-SUGGESTIONS', 'Failed to apply', result.error);
+            DEBUG.groupEnd();
+            alert('❌ Erreur lors de l\'application des suggestions');
+        }
+    } catch (error) {
+        DEBUG.error('APPLY-SUGGESTIONS', 'Error', error);
+        DEBUG.groupEnd();
+        console.error('Apply suggestions error:', error);
+        alert('❌ Erreur lors de l\'application des suggestions');
     }
 }
