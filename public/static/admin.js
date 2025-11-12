@@ -790,10 +790,16 @@ function showLibraryContent() {
         <!-- Documents List -->
         <div class="bg-gray-800 rounded-xl shadow-xl p-6 border border-gray-700">
             <div class="flex justify-between items-center mb-6">
-                <h2 class="text-xl font-bold text-white flex items-center gap-2">
-                    <i class="fas fa-list text-blue-400"></i>
-                    Documents Disponibles
-                </h2>
+                <div class="flex items-center gap-4">
+                    <h2 class="text-xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-list text-blue-400"></i>
+                        Documents Disponibles
+                    </h2>
+                    <label class="flex items-center gap-2 cursor-pointer bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg transition" title="Tout sélectionner / Tout désélectionner">
+                        <input type="checkbox" id="select-all-docs" onchange="toggleSelectAll()" class="w-4 h-4 cursor-pointer">
+                        <span class="text-white text-sm">Tout sélectionner</span>
+                    </label>
+                </div>
                 <div class="flex gap-2">
                     <button 
                         onclick="loadDocuments()"
@@ -857,6 +863,55 @@ function showLibraryContent() {
                 <div class="text-center py-12">
                     <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-white mx-auto"></div>
                     <p class="text-gray-400 mt-4">Chargement...</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Bulk Actions Floating Bar (hidden by default) -->
+        <div id="bulk-actions-bar" class="hidden fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-blue-600 to-purple-600 rounded-xl shadow-2xl p-4 z-50 border-2 border-white/20">
+            <div class="flex items-center gap-4">
+                <div class="text-white font-semibold flex items-center gap-2">
+                    <i class="fas fa-check-circle"></i>
+                    <span id="selected-count">0</span> document(s) sélectionné(s)
+                </div>
+                
+                <div class="h-8 w-px bg-white/30"></div>
+                
+                <div class="flex gap-2">
+                    <button 
+                        onclick="bulkEditDocuments()"
+                        class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                        title="Modifier les documents sélectionnés"
+                    >
+                        <i class="fas fa-edit"></i>
+                        Modifier
+                    </button>
+                    
+                    <button 
+                        onclick="bulkMoveDocuments()"
+                        class="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                        title="Déplacer vers un dossier"
+                    >
+                        <i class="fas fa-folder"></i>
+                        Déplacer
+                    </button>
+                    
+                    <button 
+                        onclick="bulkDeleteDocuments()"
+                        class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition font-semibold flex items-center gap-2"
+                        title="Supprimer les documents sélectionnés"
+                    >
+                        <i class="fas fa-trash"></i>
+                        Supprimer
+                    </button>
+                    
+                    <button 
+                        onclick="clearSelection()"
+                        class="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg transition font-semibold"
+                        title="Annuler la sélection"
+                    >
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
             </div>
         </div>
@@ -1956,6 +2011,7 @@ async function handleUpload(e) {
 
 // Global state for documents and filters
 let allDocuments = [];
+let selectedDocuments = []; // For bulk actions
 
 async function loadDocuments() {
     const listDiv = document.getElementById('documents-list');
@@ -2142,8 +2198,18 @@ function renderDocument(doc) {
         : '<span class="text-gray-500 text-xs italic">Aucun dossier</span>';
     
     return `
-        <div class="bg-gray-700 rounded-lg p-4 mb-4 border border-gray-600 hover:border-blue-500 transition">
-            <div class="flex items-start justify-between">
+        <div class="bg-gray-700 rounded-lg p-4 mb-4 border border-gray-600 hover:border-blue-500 transition" id="doc-${doc.token}">
+            <div class="flex items-start gap-3">
+                <!-- Checkbox for bulk selection -->
+                <div class="pt-1">
+                    <input 
+                        type="checkbox" 
+                        class="doc-checkbox w-5 h-5 cursor-pointer" 
+                        data-token="${doc.token}"
+                        onchange="toggleDocumentSelection('${doc.token}')"
+                    >
+                </div>
+                
                 <div class="flex-1">
                     <h3 class="text-white font-semibold text-lg mb-1 flex items-center gap-2">
                         <i class="fas fa-file-pdf text-red-400"></i>
@@ -2230,6 +2296,7 @@ function renderDocument(doc) {
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
+            </div>
             </div>
         </div>
     `;
@@ -2937,6 +3004,558 @@ async function deleteDocument(token, filename) {
     } catch (error) {
         console.error('Delete error:', error);
         alert('Erreur lors de la suppression');
+    }
+}
+
+// ==========================================
+// BULK ACTIONS - Selection Management
+// ==========================================
+
+function toggleDocumentSelection(token) {
+    const checkbox = document.querySelector(`.doc-checkbox[data-token="${token}"]`);
+    const docCard = document.getElementById(`doc-${token}`);
+    
+    if (checkbox.checked) {
+        if (!selectedDocuments.includes(token)) {
+            selectedDocuments.push(token);
+            docCard.classList.add('border-blue-500', 'bg-gray-600');
+        }
+    } else {
+        selectedDocuments = selectedDocuments.filter(t => t !== token);
+        docCard.classList.remove('border-blue-500', 'bg-gray-600');
+    }
+    
+    updateBulkActionsBar();
+    updateSelectAllCheckbox();
+}
+
+function toggleSelectAll() {
+    const selectAllCheckbox = document.getElementById('select-all-docs');
+    const allCheckboxes = document.querySelectorAll('.doc-checkbox');
+    
+    allCheckboxes.forEach(checkbox => {
+        checkbox.checked = selectAllCheckbox.checked;
+        const token = checkbox.getAttribute('data-token');
+        
+        if (selectAllCheckbox.checked) {
+            if (!selectedDocuments.includes(token)) {
+                selectedDocuments.push(token);
+            }
+            document.getElementById(`doc-${token}`).classList.add('border-blue-500', 'bg-gray-600');
+        } else {
+            selectedDocuments = [];
+            document.getElementById(`doc-${token}`).classList.remove('border-blue-500', 'bg-gray-600');
+        }
+    });
+    
+    updateBulkActionsBar();
+}
+
+function updateSelectAllCheckbox() {
+    const selectAllCheckbox = document.getElementById('select-all-docs');
+    const allCheckboxes = document.querySelectorAll('.doc-checkbox');
+    
+    if (allCheckboxes.length === 0) {
+        selectAllCheckbox.checked = false;
+        return;
+    }
+    
+    const allChecked = Array.from(allCheckboxes).every(cb => cb.checked);
+    selectAllCheckbox.checked = allChecked;
+}
+
+function updateBulkActionsBar() {
+    const bar = document.getElementById('bulk-actions-bar');
+    const countSpan = document.getElementById('selected-count');
+    
+    if (selectedDocuments.length > 0) {
+        bar.classList.remove('hidden');
+        countSpan.textContent = selectedDocuments.length;
+    } else {
+        bar.classList.add('hidden');
+    }
+}
+
+function clearSelection() {
+    selectedDocuments = [];
+    
+    const allCheckboxes = document.querySelectorAll('.doc-checkbox');
+    allCheckboxes.forEach(checkbox => {
+        checkbox.checked = false;
+        const token = checkbox.getAttribute('data-token');
+        const docCard = document.getElementById(`doc-${token}`);
+        if (docCard) {
+            docCard.classList.remove('border-blue-500', 'bg-gray-600');
+        }
+    });
+    
+    const selectAllCheckbox = document.getElementById('select-all-docs');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.checked = false;
+    }
+    
+    updateBulkActionsBar();
+}
+
+// ==========================================
+// BULK ACTIONS - Delete
+// ==========================================
+
+async function bulkDeleteDocuments() {
+    if (selectedDocuments.length === 0) {
+        alert('Aucun document sélectionné');
+        return;
+    }
+    
+    const count = selectedDocuments.length;
+    const confirmMsg = `⚠️ ATTENTION ⚠️\n\nVous êtes sur le point de supprimer ${count} document(s).\n\nCette action est IRRÉVERSIBLE.\n\nVoulez-vous continuer ?`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    // Show loading state
+    const bar = document.getElementById('bulk-actions-bar');
+    bar.innerHTML = `
+        <div class="flex items-center gap-3">
+            <div class="animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-white"></div>
+            <span class="text-white font-semibold">Suppression en cours...</span>
+        </div>
+    `;
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    // Delete documents one by one
+    for (const token of selectedDocuments) {
+        try {
+            const response = await fetch(`/api/admin/documents/${token}`, {
+                method: 'DELETE'
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                successCount++;
+            } else {
+                errorCount++;
+                console.error(`Failed to delete ${token}:`, data.error);
+            }
+        } catch (error) {
+            errorCount++;
+            console.error(`Error deleting ${token}:`, error);
+        }
+    }
+    
+    // Clear selection
+    clearSelection();
+    
+    // Reload documents
+    await loadDocuments();
+    
+    // Show result
+    if (errorCount === 0) {
+        alert(`✅ ${successCount} document(s) supprimé(s) avec succès !`);
+    } else {
+        alert(`⚠️ Résultat:\n\n✅ ${successCount} document(s) supprimé(s)\n❌ ${errorCount} erreur(s)`);
+    }
+}
+
+// ==========================================
+// BULK ACTIONS - Edit (Tags & Folder)
+// ==========================================
+
+function bulkEditDocuments() {
+    if (selectedDocuments.length === 0) {
+        alert('Aucun document sélectionné');
+        return;
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'bulk-edit-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full border border-gray-700">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-edit text-yellow-400"></i>
+                        Modifier ${selectedDocuments.length} document(s)
+                    </h2>
+                    <button onclick="closeBulkEditModal()" class="text-gray-400 hover:text-white text-2xl">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <form id="bulk-edit-form" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">
+                            Tags à ajouter (optionnel)
+                        </label>
+                        <div class="flex gap-2 mb-2">
+                            <input 
+                                type="text" 
+                                id="bulk-tag-input" 
+                                class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
+                                placeholder="Ajouter un tag"
+                                onkeypress="if(event.key === 'Enter') { event.preventDefault(); addBulkTag(); }"
+                            />
+                            <button 
+                                type="button"
+                                onclick="addBulkTag()"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition"
+                            >
+                                <i class="fas fa-plus mr-1"></i> Ajouter
+                            </button>
+                        </div>
+                        <div id="bulk-tags-container" class="flex flex-wrap gap-2 min-h-[40px] p-3 bg-gray-700 rounded-lg border border-gray-600">
+                            <span class="text-gray-500 text-sm italic">Aucun tag à ajouter</span>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">
+                            Dossier (optionnel - laissez vide pour ne pas changer)
+                        </label>
+                        <input 
+                            type="text" 
+                            id="bulk-folder-input" 
+                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
+                            placeholder="Ex: Formation/Bancassurance"
+                        />
+                        <p class="text-gray-500 text-xs mt-1">💡 Utilisez "/" pour créer une hiérarchie</p>
+                    </div>
+                    
+                    <div class="flex gap-3 mt-6">
+                        <button 
+                            type="submit" 
+                            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition"
+                        >
+                            <i class="fas fa-save mr-2"></i>
+                            Appliquer les modifications
+                        </button>
+                        <button 
+                            type="button"
+                            onclick="closeBulkEditModal()"
+                            class="bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-6 rounded-lg transition"
+                        >
+                            Annuler
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Setup form submit
+    document.getElementById('bulk-edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await submitBulkEdit();
+    });
+}
+
+const bulkEditTags = [];
+
+function addBulkTag() {
+    const input = document.getElementById('bulk-tag-input');
+    const tag = input.value.trim();
+    
+    if (tag && !bulkEditTags.includes(tag)) {
+        bulkEditTags.push(tag);
+        renderBulkTags();
+        input.value = '';
+    }
+}
+
+function removeBulkTag(tag) {
+    const index = bulkEditTags.indexOf(tag);
+    if (index > -1) {
+        bulkEditTags.splice(index, 1);
+        renderBulkTags();
+    }
+}
+
+function renderBulkTags() {
+    const container = document.getElementById('bulk-tags-container');
+    
+    if (bulkEditTags.length === 0) {
+        container.innerHTML = '<span class="text-gray-500 text-sm italic">Aucun tag à ajouter</span>';
+    } else {
+        container.innerHTML = bulkEditTags.map(tag => `
+            <span class="inline-flex items-center gap-1 bg-blue-600 text-white text-sm px-3 py-1 rounded">
+                ${tag}
+                <button 
+                    type="button"
+                    onclick="removeBulkTag('${tag}')"
+                    class="hover:text-red-300 transition"
+                >
+                    <i class="fas fa-times"></i>
+                </button>
+            </span>
+        `).join('');
+    }
+}
+
+async function submitBulkEdit() {
+    const folderInput = document.getElementById('bulk-folder-input');
+    const folder = folderInput.value.trim();
+    
+    // Show loading
+    const modal = document.getElementById('bulk-edit-modal');
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full border border-gray-700 p-6">
+            <div class="flex items-center gap-3">
+                <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+                <span class="text-white font-semibold text-lg">Modification en cours...</span>
+            </div>
+        </div>
+    `;
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    // Update each document
+    for (const token of selectedDocuments) {
+        try {
+            // Get current document
+            const doc = allDocuments.find(d => d.token === token);
+            if (!doc) continue;
+            
+            // Parse current tags
+            let currentTags = [];
+            try {
+                currentTags = JSON.parse(doc.tags || '[]');
+            } catch (e) {
+                currentTags = [];
+            }
+            
+            // Merge with new tags (avoid duplicates)
+            const updatedTags = [...new Set([...currentTags, ...bulkEditTags])];
+            
+            // Prepare update data
+            const updateData = {
+                description: doc.description || '',
+                tags: JSON.stringify(updatedTags)
+            };
+            
+            // Only update folder if provided
+            if (folder) {
+                updateData.folder = folder;
+            } else {
+                updateData.folder = doc.folder || '';
+            }
+            
+            const response = await fetch(`/api/admin/documents/${token}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updateData)
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                successCount++;
+            } else {
+                errorCount++;
+                console.error(`Failed to update ${token}:`, data.error);
+            }
+        } catch (error) {
+            errorCount++;
+            console.error(`Error updating ${token}:`, error);
+        }
+    }
+    
+    // Clear tags array
+    bulkEditTags.length = 0;
+    
+    // Close modal
+    closeBulkEditModal();
+    
+    // Clear selection
+    clearSelection();
+    
+    // Reload documents
+    await loadDocuments();
+    
+    // Show result
+    if (errorCount === 0) {
+        alert(`✅ ${successCount} document(s) modifié(s) avec succès !`);
+    } else {
+        alert(`⚠️ Résultat:\n\n✅ ${successCount} document(s) modifié(s)\n❌ ${errorCount} erreur(s)`);
+    }
+}
+
+function closeBulkEditModal() {
+    const modal = document.getElementById('bulk-edit-modal');
+    if (modal) {
+        modal.remove();
+    }
+    bulkEditTags.length = 0;
+}
+
+// ==========================================
+// BULK ACTIONS - Move to Folder
+// ==========================================
+
+function bulkMoveDocuments() {
+    if (selectedDocuments.length === 0) {
+        alert('Aucun document sélectionné');
+        return;
+    }
+    
+    // Get existing folders for suggestions
+    const folders = [...new Set(allDocuments
+        .map(doc => doc.folder || '')
+        .filter(f => f !== '')
+    )].sort();
+    
+    const modal = document.createElement('div');
+    modal.id = 'bulk-move-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4';
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full border border-gray-700">
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+                        <i class="fas fa-folder text-purple-400"></i>
+                        Déplacer ${selectedDocuments.length} document(s)
+                    </h2>
+                    <button onclick="closeBulkMoveModal()" class="text-gray-400 hover:text-white text-2xl">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                
+                <form id="bulk-move-form" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">
+                            Dossier de destination
+                        </label>
+                        <input 
+                            type="text" 
+                            id="bulk-move-folder" 
+                            list="folders-list"
+                            class="w-full px-4 py-2 bg-gray-700 border border-gray-600 rounded-lg text-white focus:ring-2 focus:ring-blue-500"
+                            placeholder="Ex: Formation/Bancassurance"
+                            required
+                        />
+                        <datalist id="folders-list">
+                            ${folders.map(f => `<option value="${f}">`).join('')}
+                        </datalist>
+                        <p class="text-gray-500 text-xs mt-1">💡 Utilisez "/" pour créer une hiérarchie</p>
+                    </div>
+                    
+                    <div class="flex gap-3 mt-6">
+                        <button 
+                            type="submit" 
+                            class="flex-1 bg-purple-600 hover:bg-purple-700 text-white font-semibold py-3 px-6 rounded-lg transition"
+                        >
+                            <i class="fas fa-arrow-right mr-2"></i>
+                            Déplacer
+                        </button>
+                        <button 
+                            type="button"
+                            onclick="closeBulkMoveModal()"
+                            class="bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-6 rounded-lg transition"
+                        >
+                            Annuler
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Setup form submit
+    document.getElementById('bulk-move-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await submitBulkMove();
+    });
+}
+
+async function submitBulkMove() {
+    const folderInput = document.getElementById('bulk-move-folder');
+    const folder = folderInput.value.trim();
+    
+    if (!folder) {
+        alert('Veuillez saisir un dossier de destination');
+        return;
+    }
+    
+    // Show loading
+    const modal = document.getElementById('bulk-move-modal');
+    modal.innerHTML = `
+        <div class="bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full border border-gray-700 p-6">
+            <div class="flex items-center gap-3">
+                <div class="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-white"></div>
+                <span class="text-white font-semibold text-lg">Déplacement en cours...</span>
+            </div>
+        </div>
+    `;
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    // Move each document
+    for (const token of selectedDocuments) {
+        try {
+            const doc = allDocuments.find(d => d.token === token);
+            if (!doc) continue;
+            
+            const updateData = {
+                description: doc.description || '',
+                tags: doc.tags || '[]',
+                folder: folder
+            };
+            
+            const response = await fetch(`/api/admin/documents/${token}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updateData)
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                successCount++;
+            } else {
+                errorCount++;
+                console.error(`Failed to move ${token}:`, data.error);
+            }
+        } catch (error) {
+            errorCount++;
+            console.error(`Error moving ${token}:`, error);
+        }
+    }
+    
+    // Close modal
+    closeBulkMoveModal();
+    
+    // Clear selection
+    clearSelection();
+    
+    // Reload documents
+    await loadDocuments();
+    
+    // Show result
+    if (errorCount === 0) {
+        alert(`✅ ${successCount} document(s) déplacé(s) vers "${folder}" avec succès !`);
+    } else {
+        alert(`⚠️ Résultat:\n\n✅ ${successCount} document(s) déplacé(s)\n❌ ${errorCount} erreur(s)`);
+    }
+}
+
+function closeBulkMoveModal() {
+    const modal = document.getElementById('bulk-move-modal');
+    if (modal) {
+        modal.remove();
     }
 }
 
