@@ -2015,15 +2015,35 @@ let selectedDocuments = []; // For bulk actions
 
 // Helper function to safely parse tags (handles both string and array formats)
 function parseTags(tagsValue) {
+    // Handle undefined/null
+    if (!tagsValue) {
+        return [];
+    }
+    
+    // Already an array
     if (Array.isArray(tagsValue)) {
         return tagsValue;
-    } else if (typeof tagsValue === 'string') {
+    }
+    
+    // String - try to parse as JSON
+    if (typeof tagsValue === 'string') {
+        // Empty string
+        if (!tagsValue.trim()) {
+            return [];
+        }
+        
         try {
-            return JSON.parse(tagsValue || '[]');
+            const parsed = JSON.parse(tagsValue);
+            // Ensure parsed result is an array
+            return Array.isArray(parsed) ? parsed : [];
         } catch (e) {
+            // If JSON parse fails, maybe it's a comma-separated string?
+            // Return empty array for safety
             return [];
         }
     }
+    
+    // Fallback for any other type
     return [];
 }
 
@@ -4842,8 +4862,8 @@ async function loadBatchDocuments() {
         
         if (data.success && data.documents.length > 0) {
             listDiv.innerHTML = data.documents.map(doc => {
-                // Parse tags if string, or use as array if already parsed
-                const tagsArray = typeof doc.tags === 'string' ? (doc.tags ? JSON.parse(doc.tags) : []) : (doc.tags || []);
+                // Parse tags using helper function
+                const tagsArray = parseTags(doc.tags);
                 
                 return `
                 <label class="flex items-center gap-3 p-3 bg-gray-800 rounded hover:bg-gray-750 cursor-pointer">
