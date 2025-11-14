@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Générateur OG Image</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            font-family: system-ui;
+        }
+        #canvas {
+            border: 2px solid #3b82f6;
+            display: block;
+            margin: 20px auto;
+        }
+        button {
+            display: block;
+            margin: 20px auto;
+            padding: 15px 30px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        .info {
+            color: white;
+            text-align: center;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" width="1200" height="630"></canvas>
+    <button onclick="downloadImage()">📥 Télécharger l'Image</button>
+    <div class="info">
+        <p>Clic droit sur l'image → "Enregistrer sous" → Nommer "og-image.png"</p>
+        <p>Ou utiliser le bouton de téléchargement ci-dessus</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Background gradient
+        const gradient = ctx.createLinearGradient(0, 0, 1200, 630);
+        gradient.addColorStop(0, '#0f172a');
+        gradient.addColorStop(1, '#1e3a8a');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 1200, 630);
+
+        // Add subtle pattern
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
+        for (let i = 0; i < 50; i++) {
+            const x = Math.random() * 1200;
+            const y = Math.random() * 630;
+            const size = Math.random() * 100 + 50;
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Logo/Icon area (top left)
+        ctx.fillStyle = '#3b82f6';
+        ctx.beginPath();
+        ctx.roundRect(50, 50, 100, 100, 20);
+        ctx.fill();
+
+        // Icon (📚)
+        ctx.font = 'bold 60px Arial';
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('📚', 100, 100);
+
+        // Main title
+        ctx.font = 'bold 72px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'left';
+        ctx.fillText('Training Storybook', 50, 250);
+
+        // Subtitle - INSURACTIO branding
+        ctx.font = 'bold 48px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = '#60a5fa';
+        ctx.fillText('INSURACTIO', 50, 320);
+
+        // Description
+        ctx.font = '32px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.fillText('Solution professionnelle de visualisation', 50, 400);
+        ctx.fillText('interactive de documents PDF', 50, 450);
+
+        // Features badges
+        const features = [
+            '🎯 Effet Page Tournée',
+            '🤖 Analyse IA',
+            '📱 QR Codes',
+            '🔓 Open Source'
+        ];
+
+        ctx.font = 'bold 24px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
+        let xOffset = 50;
+        features.forEach(feature => {
+            const width = ctx.measureText(feature).width + 30;
+            ctx.fillRect(xOffset, 510, width, 45);
+            xOffset += width + 15;
+        });
+
+        ctx.fillStyle = 'white';
+        xOffset = 50;
+        features.forEach(feature => {
+            ctx.fillText(feature, xOffset + 15, 535);
+            const width = ctx.measureText(feature).width + 30;
+            xOffset += width + 15;
+        });
+
+        // Footer
+        ctx.font = '20px system-ui, -apple-system, sans-serif';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.textAlign = 'right';
+        ctx.fillText('storybook.insuractio.com', 1150, 590);
+
+        function downloadImage() {
+            const link = document.createElement('a');
+            link.download = 'og-image.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+    </script>
+</body>
+</html>

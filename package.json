@@ -1,0 +1,39 @@
+{
+  "name": "training-storybook",
+  "version": "1.4.3",
+  "description": "Bibliothèque interactive de documents PDF avec analyse IA par lot - Training Storybook by INSURACTIO",
+  "author": "Florent Siegenthaler (INSURACTIO)",
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:sandbox": "wrangler pages dev dist --ip 0.0.0.0 --port 3000",
+    "build:css": "tailwindcss -i ./src/styles.css -o ./public/static/tailwind.css --minify",
+    "build": "node build.js",
+    "preview": "wrangler pages dev dist",
+    "deploy": "npm run build && wrangler pages deploy dist",
+    "deploy:prod": "npm run build && wrangler pages deploy dist --project-name training-storybook",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings",
+    "clean-port": "fuser -k 3000/tcp 2>/dev/null || true",
+    "test": "curl http://localhost:3000",
+    "git:save": "git add . && git status",
+    "git:commit": "git commit -m",
+    "git:push": "git push origin main",
+    "git:batch": "bash scripts/git-batch.sh",
+    "git:status": "git status",
+    "git:log": "git log --oneline -10"
+  },
+  "dependencies": {
+    "hono": "^4.10.4",
+    "page-flip": "^2.0.7"
+  },
+  "devDependencies": {
+    "@hono/vite-build": "^1.2.0",
+    "@hono/vite-dev-server": "^0.18.2",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.33",
+    "tailwindcss": "^3.4.1",
+    "vite": "^6.3.5",
+    "wrangler": "^4.4.0"
+  }
+}
