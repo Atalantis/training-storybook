@@ -888,6 +888,95 @@ app.get('/api/documents/:token', async (c) => {
   }
 })
 
+// Get document metadata by token (public access - returns JSON metadata, not PDF file)
+// This endpoint is used by the mobile Flutter app to fetch document information
+app.get('/api/documents/:token/metadata', async (c) => {
+  try {
+    const token = c.req.param('token')
+    
+    // 🔒 DEMO DOCUMENT: Return hardcoded metadata for demo file
+    if (token === '21edaf29-7fc6-4478-9e00-e63f8afccfe5') {
+      console.log('📚 [DEMO] Serving demo document metadata')
+      return c.json({
+        success: true,
+        document: {
+          token: '21edaf29-7fc6-4478-9e00-e63f8afccfe5',
+          filename: 'L-Or-et-le-BITCOIN-une-fable.pdf',
+          title: 'L\'Or et le BITCOIN : une fable',
+          description: 'Document de démonstration sur le Bitcoin et l\'or',
+          folder: 'Demo',
+          tags: ['Demo', 'Crypto', 'Bitcoin'],
+          client: 'INSURACTIO',
+          views: 0,
+          uploadedAt: new Date().toISOString(),
+          pdfUrl: `/api/documents/${token}`
+        }
+      })
+    }
+    
+    const db = c.env.DB
+    
+    if (!db) {
+      return c.json({ error: 'Database not configured' }, 500)
+    }
+    
+    // Get document metadata (NOT the PDF file)
+    const doc = await db.prepare(`
+      SELECT 
+        token, 
+        filename, 
+        description, 
+        folder, 
+        tags, 
+        client, 
+        views, 
+        uploaded_at
+      FROM documents 
+      WHERE token = ?
+    `).bind(token).first()
+    
+    if (!doc) {
+      return c.json({ success: false, error: 'Document not found' }, 404)
+    }
+    
+    // Increment view count
+    await db.prepare(`
+      UPDATE documents SET views = views + 1 WHERE token = ?
+    `).bind(token).run()
+    
+    // Parse tags from JSON string to array
+    let tagsArray: string[] = []
+    try {
+      if (doc.tags) {
+        tagsArray = JSON.parse(doc.tags as string)
+      }
+    } catch (e) {
+      console.warn('Failed to parse tags:', e)
+    }
+    
+    // Return document metadata as JSON (NOT the PDF file)
+    return c.json({
+      success: true,
+      document: {
+        token: doc.token,
+        filename: doc.filename,
+        title: doc.description || doc.filename,
+        description: doc.description,
+        folder: doc.folder,
+        tags: tagsArray,
+        client: doc.client,
+        views: doc.views,
+        uploadedAt: doc.uploaded_at,
+        // URL to download the actual PDF file
+        pdfUrl: `/api/documents/${doc.token}`
+      }
+    })
+  } catch (error) {
+    console.error('Error fetching document metadata:', error)
+    return c.json({ success: false, error: 'Failed to fetch document metadata' }, 500)
+  }
+})
+
 // Main page - Secure Landing Page (No Public Upload)
 app.get('/', (c) => {
   return c.html(`
