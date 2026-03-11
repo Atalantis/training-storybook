@@ -24,7 +24,7 @@
     "git:log": "git log --oneline -10"
   },
   "dependencies": {
-    "hono": "^4.10.4",
+    "hono": "^4.12.7",
     "page-flip": "^2.0.7"
   },
   "devDependencies": {
